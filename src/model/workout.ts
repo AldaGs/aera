@@ -78,4 +78,8 @@ export interface Workout {
   title: string;
   notes: string;
   athleteId: string; // you vs Erika, for the shared-history phase
+
+  // ingestion dedup: stable id from the source platform (Health Connect /
+  // HealthKit session id). Null for manually created workouts.
+  externalId: string | null;
 }

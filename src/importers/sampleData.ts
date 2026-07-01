@@ -56,5 +56,6 @@ export function makeSampleWorkout(
     title: sport === 'run' ? 'Sample Run' : 'Sample Ride',
     notes: '',
     athleteId: 'me',
+    externalId: null,
   };
 }

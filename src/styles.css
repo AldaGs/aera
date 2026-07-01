@@ -394,6 +394,16 @@ body {
 .source-row-disabled {
   opacity: 0.75;
 }
+.source-row-btn {
+  width: 100%;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+}
+.source-row-btn:disabled {
+  cursor: default;
+}
 .source-icon {
   width: 42px;
   height: 42px;

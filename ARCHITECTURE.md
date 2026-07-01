@@ -184,14 +184,27 @@ A distinct subsystem, designed to output PNG now and video later.
 
 ## 8. Roadmap
 
-**v1 — Android only**
-- Define Workout model + Dexie storage.
-- Health Connect importer → normalized Workout.
-- `deriveSummary` metrics engine.
-- Home, Workout Detail, Compare, Progress screens.
-- Share composer with PNG export → Instagram.
+**v1 — Android** _(in progress)_
+- ✅ Workout model + Dexie storage (v2 schema adds `externalId` for import dedup).
+- ✅ `deriveSummary` metrics engine (elevation smoothing, grade-adjusted pace, HR
+  zones, best efforts, PRs).
+- ✅ Home, Stats, Workout Detail, Record screens + Profile.
+- ✅ Share composer with PNG export → Instagram (Web Share / download).
+- ✅ Health Connect importer via `capacitor-health`: `queryWorkouts` → pure
+  `mapHealthWorkout` → normalized Workout, deduped by session id. Wired to the
+  Record tab's "Sync from watch". Needs a native Android build to exercise
+  (see `docs/ANDROID_BUILD.md`).
+- ⬜ Live phone-GPS recording (Record start button still stubbed).
 
 **v2 — iOS / Erika**
-- HealthKit importer (maps into the same Workout model).
+- HealthKit importer: `capacitor-health` already reads HealthKit, so the same
+  importer path applies — mostly manifest/entitlement + `npx cap add ios`.
 - Reuse all UI, stats, and sharing unchanged.
 - Optional: animated video share, Mapbox premium maps, Supabase shared feed.
+
+## Chosen native dependency
+
+`capacitor-health` (mley) — unified Apple Health + Google Health Connect, and
+critically it exposes the **exercise route** (`route: {timestamp,lat,lng,alt}[]`)
+and **heart-rate samples**, which map almost 1:1 onto our `TrackPoint`. Ruled out
+`capacitor-health-connect` (ubie-oss) — no route/session support.

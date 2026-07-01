@@ -23,6 +23,11 @@ class AeraDB extends Dexie {
       workouts: 'id, sport, startedAt, athleteId',
       tracks: 'workoutId',
     });
+    // v2 adds externalId for ingestion dedup.
+    this.version(2).stores({
+      workouts: 'id, sport, startedAt, athleteId, externalId',
+      tracks: 'workoutId',
+    });
   }
 }
 
@@ -41,6 +46,15 @@ export async function saveWorkout(workout: Workout): Promise<void> {
 export async function listWorkouts(): Promise<WorkoutMeta[]> {
   const all = await db.workouts.orderBy('startedAt').toArray();
   return all.reverse();
+}
+
+/** Set of externalIds already stored, for import dedup. */
+export async function existingExternalIds(): Promise<Set<string>> {
+  const ids = await db.workouts
+    .where('externalId')
+    .notEqual('')
+    .toArray();
+  return new Set(ids.map((w) => w.externalId).filter((v): v is string => !!v));
 }
 
 /** Load one full workout including its track. */

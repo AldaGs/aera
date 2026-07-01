@@ -11,12 +11,16 @@
     "typecheck": "tsc -b --noEmit"
   },
   "dependencies": {
+    "@capacitor/core": "^8.4.1",
+    "capacitor-health": "^8.1.2",
     "dexie": "^4.0.10",
     "lucide-react": "^1.22.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
+    "@capacitor/android": "^8.4.1",
+    "@capacitor/cli": "^8.4.1",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.4",
