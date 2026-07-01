@@ -48,6 +48,20 @@ function computeBounds(track: TrackPoint[]): LatLngBounds | null {
   return { minLat, maxLat, minLng, maxLng };
 }
 
+/** Downsample the track to ~maxPts [lat, lng] pairs for cheap thumbnails. */
+function routePreview(track: TrackPoint[], maxPts = 48): [number, number][] {
+  if (track.length === 0) return [];
+  if (track.length <= maxPts)
+    return track.map((p) => [p.lat, p.lng] as [number, number]);
+  const step = (track.length - 1) / (maxPts - 1);
+  const out: [number, number][] = [];
+  for (let i = 0; i < maxPts; i++) {
+    const p = track[Math.round(i * step)];
+    out.push([p.lat, p.lng]);
+  }
+  return out;
+}
+
 function avg(values: number[]): number | null {
   const nums = values.filter((v) => Number.isFinite(v));
   if (nums.length === 0) return null;
@@ -77,6 +91,7 @@ export function deriveSummary(track: TrackPoint[], sport: Sport): WorkoutSummary
     maxSpeedKmh: null,
     gradeAdjustedPaceSecPerKm: null,
     bounds: null,
+    routePreview: [],
   };
   if (track.length < 2) return empty;
 
@@ -155,5 +170,6 @@ export function deriveSummary(track: TrackPoint[], sport: Sport): WorkoutSummary
     maxSpeedKmh: maxSpeedMs * 3.6,
     gradeAdjustedPaceSecPerKm: null,
     bounds: computeBounds(track),
+    routePreview: routePreview(track),
   };
 }

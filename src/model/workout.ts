@@ -49,6 +49,10 @@ export interface WorkoutSummary {
   // Strava-flavored extras:
   gradeAdjustedPaceSecPerKm: number | null; // run — pace normalized for hills
   bounds: LatLngBounds | null;
+
+  // Downsampled [lat, lng] path (~48 pts) for cheap feed/list thumbnails,
+  // so list views never load the full raw track.
+  routePreview: [number, number][];
 }
 
 export interface Workout {

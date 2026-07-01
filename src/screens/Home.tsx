@@ -1,71 +1,65 @@
 import { useEffect, useState } from 'react';
-import { listWorkouts, saveWorkout, type WorkoutMeta } from '@/db/db';
-import { makeSampleWorkout } from '@/importers/sampleData';
-import { fmtDate, fmtDistance, fmtDuration, fmtPace, fmtSpeed } from '@/format';
+import { Heart, Share2, Mountain, Timer, Gauge, MapPin } from 'lucide-react';
+import { listWorkouts, type WorkoutMeta } from '@/db/db';
+import { RouteMap } from '@/ui/RouteMap';
+import { ProfileButton } from '@/screens/Profile';
+import { sumTotals, filterByRange } from '@/metrics/aggregate';
+import { loadProfile } from '@/store/profile';
+import {
+  fmtDate,
+  fmtDistance,
+  fmtDuration,
+  fmtPace,
+  fmtSpeed,
+} from '@/format';
 
-export function Home() {
+export function Home({
+  onOpenWorkout,
+  onOpenProfile,
+  reloadKey,
+}: {
+  onOpenWorkout: (id: string) => void;
+  onOpenProfile: () => void;
+  reloadKey: number;
+}) {
   const [workouts, setWorkouts] = useState<WorkoutMeta[]>([]);
   const [loading, setLoading] = useState(true);
-
-  async function refresh() {
-    setWorkouts(await listWorkouts());
-    setLoading(false);
-  }
+  const profile = loadProfile();
 
   useEffect(() => {
-    refresh();
-  }, []);
+    listWorkouts().then((w) => {
+      setWorkouts(w);
+      setLoading(false);
+    });
+  }, [reloadKey]);
 
-  async function addSample() {
-    const sport = Math.random() > 0.5 ? 'run' : 'ride';
-    await saveWorkout(makeSampleWorkout(sport, Math.floor(Math.random() * 14)));
-    await refresh();
-  }
+  const week = sumTotals(filterByRange(workouts, 'week'));
 
   return (
-    <div className="feed">
+    <div className="screen">
       <header className="app-header">
-        <h1>aera</h1>
-        <button className="btn" onClick={addSample}>
-          + Sample workout
-        </button>
+        <h1 className="wordmark">aera</h1>
+        <ProfileButton name={profile.name} onClick={onOpenProfile} />
       </header>
 
+      <section className="week-strip">
+        <span className="week-strip-title">This week</span>
+        <div className="week-strip-stats">
+          <MiniStat value={fmtDistance(week.distanceM)} label="Distance" />
+          <MiniStat value={fmtDuration(week.durationSec)} label="Time" />
+          <MiniStat value={`${week.count}`} label="Activities" />
+          <MiniStat value={`${Math.round(week.elevGainM)} m`} label="Elev" />
+        </div>
+      </section>
+
       {loading ? (
-        <p className="muted">Loading…</p>
+        <p className="muted center">Loading…</p>
       ) : workouts.length === 0 ? (
-        <p className="muted">
-          No workouts yet. Add a sample to see the feed, or wait for the Health
-          Connect importer.
-        </p>
+        <EmptyFeed />
       ) : (
         <ul className="card-list">
           {workouts.map((w) => (
-            <li key={w.id} className="card">
-              <div className="card-top">
-                <span className={`sport sport-${w.sport}`}>
-                  {w.sport === 'run' ? '🏃' : '🚴'} {w.title}
-                </span>
-                <span className="muted">{fmtDate(w.startedAt)}</span>
-              </div>
-              <div className="stats">
-                <Stat label="Distance" value={fmtDistance(w.summary.distanceM)} />
-                <Stat label="Time" value={fmtDuration(w.summary.durationMovingSec)} />
-                <Stat
-                  label={w.sport === 'run' ? 'Pace' : 'Speed'}
-                  value={
-                    w.sport === 'run'
-                      ? fmtPace(w.summary.avgPaceSecPerKm)
-                      : fmtSpeed(w.summary.avgSpeedKmh)
-                  }
-                />
-                <Stat label="Elev" value={`${Math.round(w.summary.elevGainM)} m`} />
-                <Stat
-                  label="Avg HR"
-                  value={w.summary.avgHr ? `${Math.round(w.summary.avgHr)}` : '—'}
-                />
-              </div>
-            </li>
+            <FeedCard key={w.id} w={w} onOpen={() => onOpenWorkout(w.id)} />
           ))}
         </ul>
       )}
@@ -73,11 +67,81 @@ export function Home() {
   );
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
+function FeedCard({ w, onOpen }: { w: WorkoutMeta; onOpen: () => void }) {
+  const isRun = w.sport === 'run';
   return (
-    <div className="stat">
-      <span className="stat-value">{value}</span>
+    <li className="card feed-card">
+      <button className="feed-card-main" onClick={onOpen}>
+        <div className="feed-card-head">
+          <div className="avatar-sm">{isRun ? '🏃' : '🚴'}</div>
+          <div className="feed-card-meta">
+            <span className="feed-card-title">{w.title}</span>
+            <span className="muted small">{fmtDate(w.startedAt)}</span>
+          </div>
+        </div>
+
+        <RouteMap path={w.summary.routePreview} bounds={w.summary.bounds} height={150} />
+
+        <div className="feed-stats">
+          <FeedStat icon={MapPin} value={fmtDistance(w.summary.distanceM)} label="Distance" />
+          <FeedStat icon={Timer} value={fmtDuration(w.summary.durationMovingSec)} label="Time" />
+          <FeedStat
+            icon={Gauge}
+            value={isRun ? fmtPace(w.summary.avgPaceSecPerKm) : fmtSpeed(w.summary.avgSpeedKmh)}
+            label={isRun ? 'Pace' : 'Speed'}
+          />
+          <FeedStat icon={Mountain} value={`${Math.round(w.summary.elevGainM)} m`} label="Elev" />
+        </div>
+      </button>
+
+      <div className="feed-actions">
+        <button className="action-btn">
+          <Heart size={18} /> Kudos
+        </button>
+        <button className="action-btn">
+          <Share2 size={18} /> Share
+        </button>
+      </div>
+    </li>
+  );
+}
+
+function FeedStat({
+  icon: IconCmp,
+  value,
+  label,
+}: {
+  icon: typeof MapPin;
+  value: string;
+  label: string;
+}) {
+  return (
+    <div className="feed-stat">
+      <IconCmp size={15} className="icon-grad" />
+      <div>
+        <div className="stat-value">{value}</div>
+        <div className="stat-label">{label}</div>
+      </div>
+    </div>
+  );
+}
+
+function MiniStat({ value, label }: { value: string; label: string }) {
+  return (
+    <div className="mini-stat">
+      <span className="mini-stat-value">{value}</span>
       <span className="stat-label">{label}</span>
+    </div>
+  );
+}
+
+function EmptyFeed() {
+  return (
+    <div className="empty">
+      <p className="muted center">
+        No activities yet. Go to <strong>Record</strong> to start a training, or add a
+        sample from there to preview the feed.
+      </p>
     </div>
   );
 }
