@@ -15,6 +15,12 @@ export interface TrackPoint {
   cad: number | null; // cadence (steps/min run, rpm bike) — optional
 }
 
+/** Fastest time to cover a target distance anywhere within the workout. */
+export interface BestEffort {
+  distanceM: number; // target: 1000, 5000, 10000…
+  durationSec: number;
+}
+
 export interface Split {
   index: number;
   distanceM: number;
@@ -48,6 +54,8 @@ export interface WorkoutSummary {
 
   // Strava-flavored extras:
   gradeAdjustedPaceSecPerKm: number | null; // run — pace normalized for hills
+  hrZones: number[] | null; // seconds in each of 5 zones [Z1..Z5]; null if no HR/maxHR
+  bestEfforts: BestEffort[]; // fastest 1k/5k/10k within this workout
   bounds: LatLngBounds | null;
 
   // Downsampled [lat, lng] path (~48 pts) for cheap feed/list thumbnails,

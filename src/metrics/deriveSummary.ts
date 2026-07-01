@@ -1,4 +1,5 @@
 import type {
+  BestEffort,
   LatLngBounds,
   Sport,
   Split,
@@ -9,8 +10,14 @@ import type {
 const EARTH_RADIUS_M = 6371000;
 // Below this speed we treat the athlete as stopped (auto-pause).
 const MOVING_SPEED_THRESHOLD_MS = 0.5;
-// Ignore sub-noise altitude wobble when summing elevation gain.
-const ELEV_NOISE_THRESHOLD_M = 1;
+// Hysteresis on the *smoothed* elevation series before counting a gain/loss.
+const ELEV_HYSTERESIS_M = 0.4;
+// Standard best-effort distances to scan for (meters).
+const BEST_EFFORT_TARGETS = [1000, 5000, 10000, 21097];
+
+export interface DeriveOptions {
+  maxHr?: number | null; // enables HR-zone breakdown when provided
+}
 
 function toRad(deg: number): number {
   return (deg * Math.PI) / 180;
@@ -31,6 +38,77 @@ export function haversine(
     Math.sin(dLat / 2) ** 2 +
     Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
   return 2 * EARTH_RADIUS_M * Math.asin(Math.sqrt(h));
+}
+
+/** Centered moving-average smoothing of a numeric series. */
+function smooth(values: (number | null)[], window: number): (number | null)[] {
+  const half = Math.floor(window / 2);
+  return values.map((v, i) => {
+    if (v == null) return null;
+    let sum = 0;
+    let n = 0;
+    for (let j = i - half; j <= i + half; j++) {
+      const x = values[j];
+      if (j >= 0 && j < values.length && x != null) {
+        sum += x;
+        n++;
+      }
+    }
+    return n ? sum / n : v;
+  });
+}
+
+/**
+ * Minetti energy-cost of running as a function of gradient (fraction, e.g. 0.1
+ * = 10% uphill). Returns cost relative to flat, used to convert real distance
+ * into flat-equivalent distance for grade-adjusted pace.
+ */
+function gradeCostFactor(grade: number): number {
+  const g = Math.max(-0.45, Math.min(0.45, grade));
+  const cr =
+    155.4 * g ** 5 -
+    30.4 * g ** 4 -
+    43.3 * g ** 3 +
+    46.3 * g ** 2 +
+    19.5 * g +
+    3.6;
+  return cr / 3.6; // 3.6 J/kg/m is the flat cost
+}
+
+/** Five-zone model by percentage of max HR: Z1<60, Z2<70, Z3<80, Z4<90, Z5≥90. */
+function hrZoneIndex(hr: number, maxHr: number): number {
+  const pct = hr / maxHr;
+  if (pct < 0.6) return 0;
+  if (pct < 0.7) return 1;
+  if (pct < 0.8) return 2;
+  if (pct < 0.9) return 3;
+  return 4;
+}
+
+/**
+ * Scan for the fastest time covering each target distance, using cumulative
+ * distance/time arrays and a two-pointer sweep. O(n) per target.
+ */
+function computeBestEfforts(
+  cumDist: number[],
+  cumTime: number[],
+  totalDist: number,
+): BestEffort[] {
+  const out: BestEffort[] = [];
+  for (const target of BEST_EFFORT_TARGETS) {
+    if (totalDist < target) continue;
+    let best = Infinity;
+    let lo = 0;
+    for (let hi = 0; hi < cumDist.length; hi++) {
+      while (cumDist[hi] - cumDist[lo] >= target) {
+        const dt = cumTime[hi] - cumTime[lo];
+        if (dt < best) best = dt;
+        lo++;
+      }
+    }
+    if (Number.isFinite(best)) out.push({ distanceM: target, durationSec: best });
+  }
+  return out;
 }
 
 function computeBounds(track: TrackPoint[]): LatLngBounds | null {
@@ -71,11 +149,12 @@ function avg(values: number[]): number | null {
 /**
  * Pure function: derive the cached summary from the raw track.
  * Source of truth stays the track; improve this and re-run over stored workouts.
- *
- * NOTE: v1 baseline. Elevation smoothing, grade-adjusted pace, and best-effort
- * segments are stubbed to null and will land in the metrics-engine pass.
  */
-export function deriveSummary(track: TrackPoint[], sport: Sport): WorkoutSummary {
+export function deriveSummary(
+  track: TrackPoint[],
+  sport: Sport,
+  opts: DeriveOptions = {},
+): WorkoutSummary {
   const empty: WorkoutSummary = {
     durationMovingSec: 0,
     durationElapsedSec: 0,
@@ -90,23 +169,43 @@ export function deriveSummary(track: TrackPoint[], sport: Sport): WorkoutSummary
     splits: [],
     maxSpeedKmh: null,
     gradeAdjustedPaceSecPerKm: null,
+    hrZones: null,
+    bestEfforts: [],
     bounds: null,
     routePreview: [],
   };
   if (track.length < 2) return empty;
+
+  // Smooth the altitude series once, up front — used for both elevation totals
+  // and grade-adjusted pace so hills are measured consistently.
+  const smoothAlt = smooth(
+    track.map((p) => p.alt),
+    9,
+  );
 
   let distanceM = 0;
   let movingMs = 0;
   let elevGainM = 0;
   let elevLossM = 0;
   let maxSpeedMs = 0;
+  let flatEquivM = 0; // grade-adjusted equivalent distance (run)
+
+  const hasMaxHr = opts.maxHr != null && opts.maxHr > 0;
+  const hrZones = hasMaxHr ? [0, 0, 0, 0, 0] : null;
+
+  // cumulative arrays for best-effort scanning
+  const cumDist: number[] = [0];
+  const cumTime: number[] = [0];
 
   // per-km split accumulation
   const splits: Split[] = [];
   let splitStartDist = 0;
   let splitStartMs = track[0].t;
-  let splitStartAlt = track[0].alt;
+  let splitStartAlt = smoothAlt[0];
   const splitHr: number[] = [];
+
+  // elevation hysteresis reference on smoothed series
+  let elevRef = smoothAlt[0];
 
   for (let i = 1; i < track.length; i++) {
     const prev = track[i - 1];
@@ -116,13 +215,38 @@ export function deriveSummary(track: TrackPoint[], sport: Sport): WorkoutSummary
     const segSpeed = segMs > 0 ? segDist / (segMs / 1000) : 0;
 
     distanceM += segDist;
-    if (segSpeed >= MOVING_SPEED_THRESHOLD_MS) movingMs += segMs;
+    cumDist.push(distanceM);
+    cumTime.push(cur.t / 1000);
+
+    const moving = segSpeed >= MOVING_SPEED_THRESHOLD_MS;
+    if (moving) movingMs += segMs;
     if (segSpeed > maxSpeedMs) maxSpeedMs = segSpeed;
 
-    if (prev.alt != null && cur.alt != null) {
-      const dAlt = cur.alt - prev.alt;
-      if (dAlt > ELEV_NOISE_THRESHOLD_M) elevGainM += dAlt;
-      else if (dAlt < -ELEV_NOISE_THRESHOLD_M) elevLossM += -dAlt;
+    // elevation: accumulate against a hysteresis reference on the smoothed series
+    const a = smoothAlt[i];
+    if (a != null && elevRef != null) {
+      const d = a - elevRef;
+      if (d > ELEV_HYSTERESIS_M) {
+        elevGainM += d;
+        elevRef = a;
+      } else if (d < -ELEV_HYSTERESIS_M) {
+        elevLossM += -d;
+        elevRef = a;
+      }
+    } else if (a != null && elevRef == null) {
+      elevRef = a;
+    }
+
+    // grade-adjusted equivalent distance (run only, on moving segments)
+    if (sport === 'run' && moving && segDist > 0) {
+      const prevA = smoothAlt[i - 1];
+      const grade = prevA != null && a != null ? (a - prevA) / segDist : 0;
+      flatEquivM += segDist * gradeCostFactor(grade);
+    }
+
+    // HR zone time
+    if (hrZones && cur.hr != null && moving) {
+      hrZones[hrZoneIndex(cur.hr, opts.maxHr!)] += segMs / 1000;
     }
     if (cur.hr != null) splitHr.push(cur.hr);
 
@@ -133,14 +257,14 @@ export function deriveSummary(track: TrackPoint[], sport: Sport): WorkoutSummary
         index: splits.length,
         distanceM: 1000,
         durationSec,
-        paceSecPerKm: durationSec, // 1km → sec/km == durationSec
+        paceSecPerKm: durationSec,
         elevChangeM:
-          cur.alt != null && splitStartAlt != null ? cur.alt - splitStartAlt : 0,
+          a != null && splitStartAlt != null ? a - splitStartAlt : 0,
         avgHr: avg(splitHr),
       });
       splitStartDist += 1000;
       splitStartMs = cur.t;
-      splitStartAlt = cur.alt;
+      splitStartAlt = a;
       splitHr.length = 0;
     }
   }
@@ -168,7 +292,12 @@ export function deriveSummary(track: TrackPoint[], sport: Sport): WorkoutSummary
     calories: null,
     splits,
     maxSpeedKmh: maxSpeedMs * 3.6,
-    gradeAdjustedPaceSecPerKm: null,
+    gradeAdjustedPaceSecPerKm:
+      sport === 'run' && flatEquivM > 0
+        ? durationMovingSec / (flatEquivM / 1000)
+        : null,
+    hrZones,
+    bestEfforts: computeBestEfforts(cumDist, cumTime, distanceM),
     bounds: computeBounds(track),
     routePreview: routePreview(track),
   };

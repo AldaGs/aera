@@ -7,6 +7,7 @@ import {
   weeklyDistanceBuckets,
   type Range,
 } from '@/metrics/aggregate';
+import { computeRecords } from '@/metrics/records';
 import { fmtDistance, fmtDuration, fmtDate } from '@/format';
 
 const RANGES: { id: Range; label: string }[] = [
@@ -33,7 +34,7 @@ export function Stats({
   const inRange = useMemo(() => filterByRange(all, range), [all, range]);
   const totals = sumTotals(inRange);
   const buckets = useMemo(() => weeklyDistanceBuckets(all, 8), [all]);
-  const records = useMemo(() => computeRecordsSafe(all), [all]);
+  const records = useMemo(() => computeRecords(all), [all]);
 
   return (
     <div className="screen">
@@ -77,7 +78,16 @@ export function Stats({
           {records.map((r) => (
             <li key={r.label} className="record-row">
               <span className="record-label">{r.label}</span>
-              <span className="record-value">{r.value}</span>
+              {r.workoutId ? (
+                <button
+                  className="record-value record-link"
+                  onClick={() => onOpenWorkout(r.workoutId!)}
+                >
+                  {r.value}
+                </button>
+              ) : (
+                <span className="record-value">{r.value}</span>
+              )}
             </li>
           ))}
         </ul>
@@ -147,30 +157,3 @@ function TrendBars({ buckets }: { buckets: { label: string; km: number }[] }) {
   );
 }
 
-interface PR {
-  label: string;
-  value: string;
-}
-
-function computeRecordsSafe(all: WorkoutMeta[]): PR[] {
-  if (all.length === 0) {
-    return [
-      { label: 'Longest run', value: '—' },
-      { label: 'Longest ride', value: '—' },
-      { label: 'Most elevation', value: '—' },
-      { label: 'Longest session', value: '—' },
-    ];
-  }
-  const runs = all.filter((w) => w.sport === 'run');
-  const rides = all.filter((w) => w.sport === 'ride');
-  const longestRun = Math.max(0, ...runs.map((w) => w.summary.distanceM));
-  const longestRide = Math.max(0, ...rides.map((w) => w.summary.distanceM));
-  const mostElev = Math.max(0, ...all.map((w) => w.summary.elevGainM));
-  const longestTime = Math.max(0, ...all.map((w) => w.summary.durationMovingSec));
-  return [
-    { label: 'Longest run', value: longestRun ? fmtDistance(longestRun) : '—' },
-    { label: 'Longest ride', value: longestRide ? fmtDistance(longestRide) : '—' },
-    { label: 'Most elevation', value: `${Math.round(mostElev)} m` },
-    { label: 'Longest session', value: fmtDuration(longestTime) },
-  ];
-}

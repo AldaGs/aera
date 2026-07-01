@@ -1,5 +1,6 @@
 import type { TrackPoint, Workout } from '@/model/workout';
 import { deriveSummary } from '@/metrics/deriveSummary';
+import { effectiveMaxHr, loadProfile } from '@/store/profile';
 
 /**
  * Generates a synthetic workout so the UI has data before the Health Connect
@@ -30,11 +31,18 @@ export function makeSampleWorkout(
       t: s * stepMs,
       lat,
       lng,
-      alt: 2240 + Math.sin(s / 120) * 15,
-      hr: Math.round(150 + Math.sin(s / 90) * 15),
+      // rolling hills: a long climb + short undulations, plus a little GPS noise
+      alt:
+        2240 +
+        Math.sin(s / 300) * 40 +
+        Math.sin(s / 45) * 6 +
+        (Math.random() - 0.5) * 2,
+      hr: Math.round(150 + Math.sin(s / 90) * 18),
       cad: sport === 'run' ? 168 : 85,
     });
   }
+
+  const maxHr = effectiveMaxHr(loadProfile()) ?? 190;
 
   const startedAt = new Date(Date.now() - daysAgo * 86400000);
   return {
@@ -44,7 +52,7 @@ export function makeSampleWorkout(
     startedAt: startedAt.toISOString(),
     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     track: points,
-    summary: deriveSummary(points, sport),
+    summary: deriveSummary(points, sport, { maxHr }),
     title: sport === 'run' ? 'Sample Run' : 'Sample Ride',
     notes: '',
     athleteId: 'me',

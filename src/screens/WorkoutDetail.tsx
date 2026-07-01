@@ -47,6 +47,13 @@ export function WorkoutDetail({ id, onClose }: { id: string; onClose: () => void
           <BigStat icon={Mountain} value={`${Math.round(s.elevGainM)} m`} label="Elev gain" />
           <BigStat icon={Heart} value={s.avgHr ? `${Math.round(s.avgHr)}` : '—'} label="Avg HR" />
           <BigStat icon={Flame} value={s.maxHr ? `${Math.round(s.maxHr)}` : '—'} label="Max HR" />
+          {isRun && s.gradeAdjustedPaceSecPerKm != null && (
+            <BigStat
+              icon={Gauge}
+              value={fmtPace(s.gradeAdjustedPaceSecPerKm)}
+              label="Grade-adj pace"
+            />
+          )}
         </div>
 
         {s.elevGainM > 0 && (
@@ -69,6 +76,33 @@ export function WorkoutDetail({ id, onClose }: { id: string; onClose: () => void
               values={w.track.map((p) => p.hr).filter((v): v is number => v != null)}
               color="#ff5a1f"
             />
+          </section>
+        )}
+
+        {s.hrZones && s.hrZones.some((z) => z > 0) && (
+          <section className="panel">
+            <div className="panel-head">
+              <Heart size={18} className="icon-grad" />
+              <h2>HR zones</h2>
+            </div>
+            <HrZones zones={s.hrZones} />
+          </section>
+        )}
+
+        {(s.bestEfforts?.length ?? 0) > 0 && (
+          <section className="panel">
+            <div className="panel-head">
+              <Flame size={18} className="icon-grad" />
+              <h2>Best efforts</h2>
+            </div>
+            <ul className="record-list">
+              {s.bestEfforts.map((e) => (
+                <li key={e.distanceM} className="record-row">
+                  <span className="record-label">{effortLabel(e.distanceM)}</span>
+                  <span className="record-value">{fmtDuration(e.durationSec)}</span>
+                </li>
+              ))}
+            </ul>
           </section>
         )}
 
@@ -116,6 +150,39 @@ function BigStat({
       <IconCmp size={20} className="icon-grad" />
       <span className="big-stat-value">{value}</span>
       <span className="stat-label">{label}</span>
+    </div>
+  );
+}
+
+const ZONE_META = [
+  { name: 'Z1', desc: 'Recovery' },
+  { name: 'Z2', desc: 'Endurance' },
+  { name: 'Z3', desc: 'Tempo' },
+  { name: 'Z4', desc: 'Threshold' },
+  { name: 'Z5', desc: 'Anaerobic' },
+];
+
+function effortLabel(m: number): string {
+  if (m === 21097) return 'Half marathon';
+  return m >= 1000 ? `Fastest ${m / 1000}K` : `Fastest ${m} m`;
+}
+
+function HrZones({ zones }: { zones: number[] }) {
+  const total = zones.reduce((a, b) => a + b, 0) || 1;
+  return (
+    <div className="zones">
+      {zones.map((secs, i) => (
+        <div key={i} className="zone-row">
+          <span className="zone-name">{ZONE_META[i].name}</span>
+          <div className="zone-track">
+            <div
+              className={`zone-fill zone-fill-${i + 1}`}
+              style={{ width: `${(secs / total) * 100}%` }}
+            />
+          </div>
+          <span className="zone-time">{fmtDuration(secs)}</span>
+        </div>
+      ))}
     </div>
   );
 }
