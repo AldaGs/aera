@@ -15,10 +15,12 @@ import {
 
 export function Home({
   onOpenWorkout,
+  onShareWorkout,
   onOpenProfile,
   reloadKey,
 }: {
   onOpenWorkout: (id: string) => void;
+  onShareWorkout: (id: string) => void;
   onOpenProfile: () => void;
   reloadKey: number;
 }) {
@@ -59,7 +61,12 @@ export function Home({
       ) : (
         <ul className="card-list">
           {workouts.map((w) => (
-            <FeedCard key={w.id} w={w} onOpen={() => onOpenWorkout(w.id)} />
+            <FeedCard
+              key={w.id}
+              w={w}
+              onOpen={() => onOpenWorkout(w.id)}
+              onShare={() => onShareWorkout(w.id)}
+            />
           ))}
         </ul>
       )}
@@ -67,7 +74,15 @@ export function Home({
   );
 }
 
-function FeedCard({ w, onOpen }: { w: WorkoutMeta; onOpen: () => void }) {
+function FeedCard({
+  w,
+  onOpen,
+  onShare,
+}: {
+  w: WorkoutMeta;
+  onOpen: () => void;
+  onShare: () => void;
+}) {
   const isRun = w.sport === 'run';
   return (
     <li className="card feed-card">
@@ -98,7 +113,7 @@ function FeedCard({ w, onOpen }: { w: WorkoutMeta; onOpen: () => void }) {
         <button className="action-btn">
           <Heart size={18} /> Kudos
         </button>
-        <button className="action-btn">
+        <button className="action-btn" onClick={onShare}>
           <Share2 size={18} /> Share
         </button>
       </div>

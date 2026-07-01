@@ -5,7 +5,15 @@ import type { Workout } from '@/model/workout';
 import { RouteMap } from '@/ui/RouteMap';
 import { fmtDate, fmtDistance, fmtDuration, fmtPace, fmtSpeed } from '@/format';
 
-export function WorkoutDetail({ id, onClose }: { id: string; onClose: () => void }) {
+export function WorkoutDetail({
+  id,
+  onClose,
+  onShare,
+}: {
+  id: string;
+  onClose: () => void;
+  onShare: (id: string) => void;
+}) {
   const [w, setW] = useState<Workout | undefined>();
 
   useEffect(() => {
@@ -116,8 +124,8 @@ export function WorkoutDetail({ id, onClose }: { id: string; onClose: () => void
           </section>
         )}
 
-        <button className="btn" disabled>
-          <Share2 size={18} /> Share (coming soon)
+        <button className="btn" onClick={() => onShare(id)}>
+          <Share2 size={18} /> Share
         </button>
       </div>
     </div>

@@ -766,3 +766,67 @@ body {
 .empty {
   padding: 40px 20px;
 }
+
+/* ---------- share composer ---------- */
+.share-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.share-preview {
+  display: flex;
+  justify-content: center;
+  background: #05050a;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 14px;
+}
+.share-svg {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+}
+.share-svg svg {
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  border-radius: 12px;
+  box-shadow: 0 20px 60px -20px #000;
+}
+.share-preview-story .share-svg svg {
+  max-height: 52vh;
+}
+.share-preview-square .share-svg svg {
+  max-height: 46vh;
+}
+.share-templates {
+  margin-bottom: 4px;
+}
+.share-hint {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.toast {
+  position: fixed;
+  bottom: 90px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  color: var(--text);
+  padding: 10px 18px;
+  border-radius: 999px;
+  font-weight: 600;
+  z-index: 60;
+  animation: fadein 0.2s ease;
+}
+@keyframes fadein {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 6px);
+  }
+}
