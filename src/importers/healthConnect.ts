@@ -14,13 +14,44 @@ const READ_PERMISSIONS: HealthPermission[] = [
 
 export interface ImportResult {
   imported: number;
-  skipped: number; // duplicates or unsupported sports
+  skippedDup: number; // already stored
+  skippedUnsupported: number; // sport not run/ride
   total: number; // sessions returned by the platform
+  withRoute: number; // sessions that had GPS route points
+  types: Record<string, number>; // workoutType -> count
+  granted: Record<string, boolean>; // permission -> granted
 }
 
 /** True only inside a real native Android/iOS build — web has no Health Connect. */
 export function healthAvailable(): boolean {
   return Capacitor.isNativePlatform();
+}
+
+/**
+ * Read granted permissions, tolerating the shapes capacitor-health has used:
+ * an array of {name: boolean} maps, a positional boolean array aligned to the
+ * request, or a flat {name: boolean} object.
+ */
+async function grantedPermissions(): Promise<Record<string, boolean>> {
+  const out: Record<string, boolean> = {};
+  try {
+    const res = (await Health.checkHealthPermissions({
+      permissions: READ_PERMISSIONS,
+    })) as { permissions?: unknown };
+    const list = res.permissions;
+    if (Array.isArray(list)) {
+      list.forEach((entry, i) => {
+        if (typeof entry === 'boolean') out[READ_PERMISSIONS[i]] = entry;
+        else if (entry && typeof entry === 'object')
+          for (const [k, v] of Object.entries(entry)) out[k] = Boolean(v);
+      });
+    } else if (list && typeof list === 'object') {
+      for (const [k, v] of Object.entries(list)) out[k] = Boolean(v);
+    }
+  } catch {
+    /* leave empty — surfaced as "unknown" in the UI */
+  }
+  return out;
 }
 
 export async function requestHealthAccess(): Promise<boolean> {
@@ -52,16 +83,24 @@ export async function importFromHealthConnect(days = 90): Promise<ImportResult> 
   const maxHr = effectiveMaxHr(loadProfile());
 
   let imported = 0;
-  let skipped = 0;
+  let skippedDup = 0;
+  let skippedUnsupported = 0;
+  let withRoute = 0;
+  const types: Record<string, number> = {};
+
   for (const hw of raw) {
+    const typeKey = String(hw.workoutType ?? 'unknown');
+    types[typeKey] = (types[typeKey] ?? 0) + 1;
+    if ((hw.route?.length ?? 0) > 0) withRoute++;
+
     const key = externalKey(hw);
     if (seen.has(key)) {
-      skipped++;
+      skippedDup++;
       continue;
     }
     const mapped: Workout | null = mapHealthWorkout(hw, { athleteId: 'me', maxHr });
     if (!mapped) {
-      skipped++;
+      skippedUnsupported++;
       continue;
     }
     await saveWorkout(mapped);
@@ -69,5 +108,13 @@ export async function importFromHealthConnect(days = 90): Promise<ImportResult> 
     imported++;
   }
 
-  return { imported, skipped, total: raw.length };
+  return {
+    imported,
+    skippedDup,
+    skippedUnsupported,
+    total: raw.length,
+    withRoute,
+    types,
+    granted: await grantedPermissions(),
+  };
 }

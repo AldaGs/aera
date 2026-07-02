@@ -5,22 +5,23 @@ import { saveWorkout } from '@/db/db';
 import { makeSampleWorkout } from '@/importers/sampleData';
 import { loadConnectivity, saveConnectivity } from '@/store/profile';
 import {
-  healthAvailable,
-  requestHealthAccess,
-  importFromHealthConnect,
-} from '@/importers/healthConnect';
+  samsungAvailable,
+  requestSamsungAccess,
+  importFromSamsungHealth,
+} from '@/importers/samsungHealth';
 
 /**
  * Record tab. Live phone-GPS recording is still pending; the working data path
- * is watch → Samsung Health → Health Connect → this Sync button (native only).
- * On web, Sync is unavailable and the sample seeder stands in.
+ * is watch → Samsung Health → this Sync button, read directly via the custom
+ * Samsung Health Data SDK plugin (native only). On web, Sync is unavailable and
+ * the sample seeder stands in.
  */
 export function Record({ onRecorded }: { onRecorded: () => void }) {
   const [sport, setSport] = useState<Sport>('run');
   const [syncing, setSyncing] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const conn = loadConnectivity();
-  const canSync = healthAvailable();
+  const canSync = samsungAvailable();
 
   async function addSample() {
     await saveWorkout(makeSampleWorkout(sport, Math.floor(Math.random() * 14)));
@@ -32,25 +33,39 @@ export function Record({ onRecorded }: { onRecorded: () => void }) {
     setSyncing(true);
     setMsg(null);
     try {
-      const ok = await requestHealthAccess();
+      const ok = await requestSamsungAccess();
       if (!ok) {
-        setMsg('Health Connect is not available on this device.');
+        setMsg('Samsung Health access was not granted, or the SDK is unavailable.');
         return;
       }
-      const r = await importFromHealthConnect();
+      const r = await importFromSamsungHealth();
       saveConnectivity({
         ...conn,
         healthConnectLinked: true,
         watchName: conn.watchName ?? 'Galaxy Watch 4',
         lastSyncAt: new Date().toISOString(),
       });
-      setMsg(
-        r.imported > 0
-          ? `Imported ${r.imported} workout${r.imported > 1 ? 's' : ''}` +
-              (r.skipped ? ` · ${r.skipped} already synced` : '')
-          : `No new workouts (${r.total} found)`,
-      );
-      if (r.imported > 0) onRecorded();
+
+      if (r.imported > 0) {
+        setMsg(
+          `Imported ${r.imported} workout${r.imported > 1 ? 's' : ''}` +
+            (r.skippedDup ? ` · ${r.skippedDup} already synced` : ''),
+        );
+        onRecorded();
+      } else if (r.total === 0) {
+        setMsg(
+          '0 exercise sessions found in Samsung Health.\n' +
+            'Record a run on the watch and let it sync to the phone, then try again.',
+        );
+      } else {
+        const typeList = Object.entries(r.types)
+          .map(([t, n]) => `${t}×${n}`)
+          .join(', ');
+        setMsg(
+          `Found ${r.total} session${r.total > 1 ? 's' : ''} (${typeList}); ${r.withRoute} with GPS route.\n` +
+            `${r.skippedDup} already synced · ${r.skippedUnsupported} unsupported type.`,
+        );
+      }
     } catch (e) {
       setMsg(e instanceof Error ? e.message : 'Sync failed');
     } finally {
@@ -109,7 +124,7 @@ export function Record({ onRecorded }: { onRecorded: () => void }) {
           <div className="source-text">
             <span className="source-title">Sync from watch</span>
             <span className="muted small">
-              {conn.watchName ?? 'Galaxy Watch 4'} · via Health Connect
+              {conn.watchName ?? 'Galaxy Watch 4'} · via Samsung Health
             </span>
           </div>
           <span className="source-status">
@@ -118,7 +133,7 @@ export function Record({ onRecorded }: { onRecorded: () => void }) {
         </button>
       </div>
 
-      {msg && <p className="muted small center">{msg}</p>}
+      {msg && <p className="muted small center sync-msg">{msg}</p>}
 
       <button className="btn-ghost" onClick={addSample}>
         <Plus size={18} /> Add sample {sport} (dev)

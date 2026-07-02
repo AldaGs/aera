@@ -31,11 +31,21 @@ export function externalKey(hw: HealthWorkout): string {
   return hw.id ?? `${hw.startDate}_${hw.endDate}`;
 }
 
-/** Map a platform exercise type to our two v1 sports; null = unsupported. */
+/**
+ * Map a platform exercise type to our sports; null = unsupported.
+ * Foot-based activities (run/walk/hike) bucket to 'run'; wheeled to 'ride'.
+ * Health Connect also reports numeric exercise-type codes as strings, so we
+ * match the common ones by number too.
+ */
 export function mapSport(workoutType: string): Sport | null {
-  const t = workoutType.toUpperCase();
-  if (t.includes('RUN')) return 'run';
+  const t = String(workoutType).toUpperCase();
+  if (t.includes('RUN') || t.includes('WALK') || t.includes('HIK')) return 'run';
   if (t.includes('BIK') || t.includes('CYCL')) return 'ride';
+  // Health Connect numeric EXERCISE_TYPE codes (when passed through as-is):
+  // 56=RUNNING, 57=RUNNING_TREADMILL, 79=WALKING, 73=HIKING,
+  // 8=BIKING, 9=BIKING_STATIONARY.
+  if (['56', '57', '79', '73'].includes(t)) return 'run';
+  if (['8', '9'].includes(t)) return 'ride';
   return null;
 }
 

@@ -404,6 +404,11 @@ body {
 .source-row-btn:disabled {
   cursor: default;
 }
+.sync-msg {
+  white-space: pre-line;
+  line-height: 1.5;
+  padding: 0 8px;
+}
 .source-icon {
   width: 42px;
   height: 42px;

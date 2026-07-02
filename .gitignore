@@ -5,9 +5,20 @@ dist-ssr/
 *.tsbuildinfo
 .DS_Store
 
-# Capacitor native build output (added when platforms are generated)
-/android
+# Capacitor: track the android/ project (it holds the Health Connect manifest
+# wiring + the custom Samsung Health plugin) but ignore build caches & secrets.
 /ios
+android/build/
+android/app/build/
+android/.gradle/
+android/.idea/
+android/local.properties
+android/app/src/main/assets/public/
+android/app/src/main/assets/capacitor.config.json
+android/app/src/main/assets/capacitor.plugins.json
+# Samsung Health Data SDK AAR — download per-machine (license: don't commit).
+android/app/libs/*.aar
+android/capacitor-cordova-android-plugins/
 
 # Editor
 .vscode/*

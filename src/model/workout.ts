@@ -3,7 +3,11 @@
 // it by importers and is never touched directly elsewhere.
 
 export type Sport = 'run' | 'ride';
-export type WorkoutSource = 'health-connect' | 'healthkit' | 'manual';
+export type WorkoutSource =
+  | 'health-connect'
+  | 'samsung-health'
+  | 'healthkit'
+  | 'manual';
 
 /** One recorded GPS sample (~1/sec). The raw stream is the source of truth. */
 export interface TrackPoint {
