@@ -80,13 +80,6 @@ class SamsungHealthPlugin : Plugin() {
         }
     }
 
-    /** Coerce a lap duration (java.time.Duration or a Number of seconds) to seconds. */
-    private fun durationSeconds(v: Any): Double = when (v) {
-        is java.time.Duration -> v.seconds.toDouble()
-        is Number -> v.toDouble()
-        else -> 0.0
-    }
-
     @PluginMethod
     fun readWorkouts(call: PluginCall) {
         val days = call.getInt("days", 90) ?: 90
@@ -151,8 +144,12 @@ class SamsungHealthPlugin : Plugin() {
 
                         // Combined per-sample log with HR + speed + cadence + power
                         // → [{ timestamp, bpm?, speed?, cadence?, power? }]
+                        // Per-sample log. NOTE (verified on-device via logcat): the
+                        // SDK's ExerciseLog exposes HR only — no per-sample speed /
+                        // cadence / interval tags — and ExerciseSession has no lap
+                        // accessor. So interval/lap breakdowns aren't available via the
+                        // Data SDK (they live only in Samsung's internal export files).
                         val logArr = JSArray()
-                        var loggedInterval = false
                         for (log in s.log ?: emptyList()) {
                             val entry = JSObject()
                             entry.put("timestamp", log.timestamp.toString())
@@ -160,24 +157,8 @@ class SamsungHealthPlugin : Plugin() {
                             log.speed?.let { entry.put("speed", it.toDouble()) }
                             log.cadence?.let { entry.put("cadence", it.toDouble()) }
                             log.power?.let { entry.put("power", it.toDouble()) }
-                            // Interval/segment tags mark programmed-workout laps
-                            // (warm-up + walk/run repeats). Read reflectively since
-                            // the accessor name varies / may be absent.
-                            fun readNum(name: String): Double? {
-                                val method = log.javaClass.methods.firstOrNull {
-                                    it.name == name && it.parameterTypes.isEmpty()
-                                } ?: return null
-                                return (method.invoke(log) as? Number)?.toDouble()
-                            }
-                            (readNum("getInterval") ?: readNum("getIntervalIndex"))?.let {
-                                entry.put("interval", it); loggedInterval = true
-                            }
-                            (readNum("getSegment") ?: readNum("getSegmentIndex"))?.let {
-                                entry.put("segment", it)
-                            }
                             logArr.put(entry)
                         }
-                        if (i == 0) Log.d("SamsungHealth", "log has interval tags: $loggedInterval")
                         o.put("log", logArr)
 
                         // Keep legacy heartRate array for backward compat
@@ -190,52 +171,6 @@ class SamsungHealthPlugin : Plugin() {
                             hr.put(h)
                         }
                         o.put("heartRate", hr)
-
-                        // Laps / segments for interval workouts. The exact accessor
-                        // varies by SDK version, so resolve it reflectively (getLaps /
-                        // getSegments) and emit whatever start/end/distance/duration we
-                        // can read off each element. Absent → empty array (JS falls back
-                        // to deriving laps from the track).
-                        val lapsArr = JSArray()
-                        try {
-                            // One-time introspection so we can identify the exact lap
-                            // accessor on this SDK version (names vary): dump every
-                            // zero-arg getter on the session to logcat.
-                            if (i == 0) {
-                                val getters = s.javaClass.methods
-                                    .filter { it.parameterTypes.isEmpty() && it.name.startsWith("get") }
-                                    .map { it.name }
-                                    .distinct()
-                                    .sorted()
-                                Log.d("SamsungHealth", "ExerciseSession getters: ${getters.joinToString()}")
-                            }
-                            val lapGetter = s.javaClass.methods.firstOrNull {
-                                it.parameterTypes.isEmpty() &&
-                                    it.name in listOf(
-                                        "getLaps", "getSegments", "getIntervals",
-                                        "getPhases", "getSplits", "getSteps",
-                                    )
-                            }
-                            val laps = lapGetter?.invoke(s) as? List<*> ?: emptyList<Any>()
-                            Log.d("SamsungHealth", "session[$i] lapGetter=${lapGetter?.name} laps=${laps.size}")
-                            for (lap in laps) {
-                                if (lap == null) continue
-                                val le = JSObject()
-                                fun read(name: String): Any? =
-                                    lap.javaClass.methods
-                                        .firstOrNull { it.name == name && it.parameterTypes.isEmpty() }
-                                        ?.invoke(lap)
-                                (read("getStartTime") ?: read("getStart"))?.let { le.put("startDate", it.toString()) }
-                                (read("getEndTime") ?: read("getEnd"))?.let { le.put("endDate", it.toString()) }
-                                (read("getDistance"))?.let { le.put("distance", (it as? Number)?.toDouble() ?: 0.0) }
-                                (read("getDuration"))?.let { le.put("duration", durationSeconds(it)) }
-                                (read("getExerciseType"))?.let { le.put("type", it.toString()) }
-                                lapsArr.put(le)
-                            }
-                        } catch (e: Exception) {
-                            Log.w("SamsungHealth", "lap read failed: ${e.message}")
-                        }
-                        o.put("laps", lapsArr)
 
                         arr.put(o)
                     }
