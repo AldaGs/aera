@@ -132,6 +132,10 @@ class SamsungHealthPlugin : Plugin() {
                         try { o.put("meanSpeed", (s.meanSpeed ?: 0f).toDouble()) } catch (_: Exception) {}
                         try { o.put("maxSpeed", (s.maxSpeed ?: 0f).toDouble()) } catch (_: Exception) {}
                         try { o.put("vo2Max", (s.vo2Max ?: 0f).toDouble()) } catch (_: Exception) {}
+                        // Session-level HR — authoritative over the per-sample log when
+                        // the GPS route (and thus the attached HR track) is partial.
+                        try { o.put("meanHeartRate", (s.meanHeartRate ?: 0f).toDouble()) } catch (_: Exception) {}
+                        try { o.put("maxHeartRate", (s.maxHeartRate ?: 0f).toDouble()) } catch (_: Exception) {}
 
                         // Route (GPS) → [{ timestamp, lat, lng, alt? }]
                         val route = JSArray()

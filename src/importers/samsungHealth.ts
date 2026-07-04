@@ -52,15 +52,7 @@ export async function importFromSamsungHealth(days = 90): Promise<ImportResult> 
 
     const key = externalKey(hw);
     const prior = existing.get(key);
-    // Already stored: skip, unless the incoming payload now carries a route the
-    // stored one lacks (e.g. re-sync after granting location) — then upgrade it.
-    if (prior) {
-      const priorHasRoute = prior.summary.bounds != null;
-      if (!(hasRoute && !priorHasRoute)) {
-        skippedDup++;
-        continue;
-      }
-    }
+
     const mapped: Workout | null = mapHealthWorkout(hw, {
       athleteId: 'me',
       maxHr,
@@ -73,9 +65,23 @@ export async function importFromSamsungHealth(days = 90): Promise<ImportResult> 
     }
     // Samsung 'source' distinguishes it from the Health Connect path.
     mapped.source = 'samsung-health';
-    // When upgrading, reuse the existing row id so it replaces in place.
+
+    // Already stored: re-import (upgrade in place) when a route was newly added
+    // OR the corrected metrics differ materially from what we stored (e.g. a
+    // partial-GPS run whose watch distance we now trust). Otherwise skip as dup.
     if (prior) {
+      const priorHasRoute = prior.summary.bounds != null;
+      const routeAdded = hasRoute && !priorHasRoute;
+      const distDelta = Math.abs(mapped.summary.distanceM - prior.summary.distanceM);
+      const metricsChanged = distDelta > Math.max(50, prior.summary.distanceM * 0.02);
+      if (!routeAdded && !metricsChanged) {
+        skippedDup++;
+        continue;
+      }
+      // Reuse the row id and keep the user's text layer (title/notes).
       mapped.id = prior.id;
+      if (prior.title) mapped.title = prior.title;
+      if (prior.notes) mapped.notes = prior.notes;
       upgraded++;
     } else {
       imported++;

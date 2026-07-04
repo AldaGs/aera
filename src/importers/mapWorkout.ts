@@ -48,6 +48,8 @@ export interface HealthWorkout {
   meanSpeed?: number;  // m/s
   maxSpeed?: number;   // m/s
   vo2Max?: number;
+  meanHeartRate?: number; // bpm, session-level
+  maxHeartRate?: number;  // bpm, session-level
   laps?: HealthLap[];
 }
 
@@ -207,31 +209,45 @@ export function mapHealthWorkout(
     summary.laps = mapLaps(hw.laps, startMs, sport);
   }
 
-  // The platform's own summary is authoritative when we lack a track to derive
-  // from (e.g. treadmill runs, or Samsung sessions that arrive without a route).
-  if (track.length < 2) {
-    if (hw.distance && hw.distance > 0) summary.distanceM = hw.distance;
-    if (hw.duration > 0) {
-      summary.durationMovingSec = hw.duration;
-      summary.durationElapsedSec = hw.duration;
-    }
-    // Recompute pace/speed from the platform distance + duration so the card
-    // doesn't show "—" when there's no track to derive them from.
-    if (summary.distanceM > 0 && summary.durationMovingSec > 0) {
-      const km = summary.distanceM / 1000;
-      if (sport === 'run' || sport === 'walk') {
-        summary.avgPaceSecPerKm = summary.durationMovingSec / km;
-      } else {
-        summary.avgSpeedKmh = km / (summary.durationMovingSec / 3600);
-      }
+  // The platform's session summary (distance/duration/HR) comes from the watch's
+  // fused sensors and stays correct even when the embedded GPS route is missing
+  // or PARTIAL (GPS dropout mid-run). Trust it whenever it materially exceeds what
+  // the track alone yields — otherwise a dropped-GPS run under-reports badly (e.g.
+  // a 2.75 km watch run shows as the 0.36 km that GPS happened to capture). The
+  // track is still kept for the route shape, splits, elevation, zones and charts.
+  const noTrack = track.length < 2;
+  if (hw.distance && hw.distance > 0 && (noTrack || hw.distance > summary.distanceM * 1.05)) {
+    summary.distanceM = hw.distance;
+  }
+  if (hw.duration > 0 && (noTrack || hw.duration > summary.durationElapsedSec * 1.05)) {
+    summary.durationMovingSec = hw.duration;
+    summary.durationElapsedSec = hw.duration;
+  }
+  // Recompute pace/speed from the (possibly platform-corrected) distance + time.
+  if (summary.distanceM > 0 && summary.durationMovingSec > 0) {
+    const km = summary.distanceM / 1000;
+    if (sport === 'run' || sport === 'walk') {
+      summary.avgPaceSecPerKm = summary.durationMovingSec / km;
+      summary.avgSpeedKmh = null;
+    } else {
+      summary.avgSpeedKmh = km / (summary.durationMovingSec / 3600);
+      summary.avgPaceSecPerKm = null;
     }
   }
   if (hw.calories > 0) summary.calories = Math.round(hw.calories);
 
-  // Pass through session-level metrics from Samsung Health when available
+  // Pass through session-level metrics from Samsung Health when available. These
+  // cover the whole session, so they beat track-derived aggregates on a partial
+  // route (where HR/cadence would otherwise reflect only the GPS fragment).
+  if (hw.meanHeartRate && hw.meanHeartRate > 0) summary.avgHr = Math.round(hw.meanHeartRate);
+  if (hw.maxHeartRate && hw.maxHeartRate > 0) summary.maxHr = Math.round(hw.maxHeartRate);
   if (hw.meanCadence && hw.meanCadence > 0) summary.avgCadence = hw.meanCadence;
   if (hw.maxCadence && hw.maxCadence > 0) summary.maxCadence = hw.maxCadence;
   if (hw.vo2Max && hw.vo2Max > 0) summary.vo2Max = hw.vo2Max;
+  // Re-estimate steps from the corrected duration when cadence is known.
+  if ((sport === 'run' || sport === 'walk') && summary.avgCadence != null && summary.durationMovingSec > 0) {
+    summary.totalSteps = Math.round(summary.avgCadence * (summary.durationMovingSec / 60));
+  }
 
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const sportLabel = sport === 'run' ? 'Run' : sport === 'walk' ? 'Walk' : 'Ride';
