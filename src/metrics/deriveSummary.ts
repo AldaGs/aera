@@ -367,8 +367,14 @@ export function deriveSummary(
   for (let i = 1; i < track.length; i++) {
     const prev = track[i - 1];
     const cur = track[i];
-    const segDist = haversine(prev.lat, prev.lng, cur.lat, cur.lng);
     const segMs = cur.t - prev.t;
+    const dtSec = segMs / 1000;
+    const gpsDist = haversine(prev.lat, prev.lng, cur.lat, cur.lng);
+    // When GPS is stalled/absent (position carried forward), the great-circle
+    // distance collapses to ~0 even though the athlete moved — fall back to the
+    // watch's per-sample speed so distance/splits/pace stay whole.
+    const speedDist = cur.speed != null && dtSec > 0 ? cur.speed * dtSec : 0;
+    const segDist = gpsDist < 1 && speedDist > 0 ? speedDist : gpsDist;
     const segSpeed = segMs > 0 ? segDist / (segMs / 1000) : 0;
 
     distanceM += segDist;

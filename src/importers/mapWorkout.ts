@@ -78,12 +78,85 @@ export function mapSport(workoutType: string): Sport | null {
   return null;
 }
 
+function parseTs(s: string): number {
+  return Date.parse(s);
+}
+
+/**
+ * Build the point stream from the per-second exercise `log` (HR/speed/cadence/
+ * power), attaching a GPS position by nearest timestamp when one exists and
+ * carrying the last known position forward otherwise. Used when GPS dropped out
+ * mid-run: the watch log still covers the whole session, so charts, HR zones,
+ * splits and pace stay full-length even though the route is only a fragment.
+ */
+function buildFromLog(
+  log: HealthLogSample[],
+  route: HealthRouteSample[],
+  startMs: number,
+): TrackPoint[] {
+  const logSorted = [...log].sort((a, b) => parseTs(a.timestamp) - parseTs(b.timestamp));
+  const routeSorted = [...route].sort((a, b) => parseTs(a.timestamp) - parseTs(b.timestamp));
+  let j = 0;
+  let lastLat = routeSorted.length ? routeSorted[0].lat : 0;
+  let lastLng = routeSorted.length ? routeSorted[0].lng : 0;
+  let lastAlt: number | null = null;
+  return logSorted.map((l) => {
+    const t = parseTs(l.timestamp);
+    while (
+      j < routeSorted.length - 1 &&
+      Math.abs(parseTs(routeSorted[j + 1].timestamp) - t) <=
+        Math.abs(parseTs(routeSorted[j].timestamp) - t)
+    ) {
+      j++;
+    }
+    const r = routeSorted[j];
+    // Snap to a real GPS fix only when it's close in time; else keep the last one.
+    if (r && Math.abs(parseTs(r.timestamp) - t) <= 10000) {
+      lastLat = r.lat;
+      lastLng = r.lng;
+      if (r.alt != null && Number.isFinite(r.alt)) lastAlt = r.alt;
+    }
+    return {
+      t: t - startMs,
+      lat: lastLat,
+      lng: lastLng,
+      alt: lastAlt,
+      hr: l.bpm ?? null,
+      cad: l.cadence ?? null,
+      speed: l.speed ?? null,
+      power: l.power ?? null,
+    };
+  });
+}
+
+/**
+ * Choose the fuller source for the point stream. The per-second `log` wins when
+ * GPS covers noticeably less time than the sensor log (a dropout); otherwise the
+ * GPS `route` is the master (outdoor runs stream position + sensors together).
+ */
+function buildTrack(
+  route: HealthRouteSample[],
+  hr: HealthHrSample[],
+  log: HealthLogSample[],
+  startMs: number,
+): TrackPoint[] {
+  if (route.length >= 2 && log.length >= 2) {
+    const rSpan = parseTs(route[route.length - 1].timestamp) - parseTs(route[0].timestamp);
+    const lSpan = parseTs(log[log.length - 1].timestamp) - parseTs(log[0].timestamp);
+    if (rSpan < lSpan * 0.8) return buildFromLog(log, route, startMs);
+  } else if (route.length < 2 && log.length >= 2) {
+    // No usable GPS at all but we have sensors (treadmill w/ log) — still chart it.
+    return buildFromLog(log, route, startMs);
+  }
+  return buildFromRoute(route, hr, log, startMs);
+}
+
 /**
  * Attach HR/speed/cadence/power samples to route points by nearest timestamp
  * (both sorted, two-pointer). Prefers the combined `log` array; falls back to
  * the legacy `heartRate` array.
  */
-function buildTrack(
+function buildFromRoute(
   route: HealthRouteSample[],
   hr: HealthHrSample[],
   log: HealthLogSample[],
