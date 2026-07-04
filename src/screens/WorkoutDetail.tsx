@@ -241,7 +241,10 @@ export function WorkoutDetail({
           </>
         )}
 
-        {s.laps && s.laps.length > 0 && (
+        {/* Only show intervals we can trust: real per-lap distance (platform laps
+            or a speed-derived split), not the degenerate all-"rest"/0 km fallback
+            that appears when the sample log lacks speed. */}
+        {s.laps && s.laps.some((l) => l.distanceM > 50) && (
           <section className="panel">
             <div className="panel-head">
               <Repeat size={18} className="icon-grad" />

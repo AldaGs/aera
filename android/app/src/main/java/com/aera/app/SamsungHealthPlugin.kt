@@ -181,12 +181,26 @@ class SamsungHealthPlugin : Plugin() {
                         // to deriving laps from the track).
                         val lapsArr = JSArray()
                         try {
+                            // One-time introspection so we can identify the exact lap
+                            // accessor on this SDK version (names vary): dump every
+                            // zero-arg getter on the session to logcat.
+                            if (i == 0) {
+                                val getters = s.javaClass.methods
+                                    .filter { it.parameterTypes.isEmpty() && it.name.startsWith("get") }
+                                    .map { it.name }
+                                    .distinct()
+                                    .sorted()
+                                Log.d("SamsungHealth", "ExerciseSession getters: ${getters.joinToString()}")
+                            }
                             val lapGetter = s.javaClass.methods.firstOrNull {
                                 it.parameterTypes.isEmpty() &&
-                                    (it.name == "getLaps" || it.name == "getSegments")
+                                    it.name in listOf(
+                                        "getLaps", "getSegments", "getIntervals",
+                                        "getPhases", "getSplits", "getSteps",
+                                    )
                             }
                             val laps = lapGetter?.invoke(s) as? List<*> ?: emptyList<Any>()
-                            Log.d("SamsungHealth", "session[$i] laps=${laps.size}")
+                            Log.d("SamsungHealth", "session[$i] lapGetter=${lapGetter?.name} laps=${laps.size}")
                             for (lap in laps) {
                                 if (lap == null) continue
                                 val le = JSObject()

@@ -157,6 +157,18 @@ function usesPace(sport: Sport): boolean {
   return sport === 'run' || sport === 'walk';
 }
 
+/**
+ * Distance between two consecutive track points. Uses GPS great-circle distance,
+ * but falls back to the watch's per-sample speed when GPS is stalled/carried
+ * forward (great-circle ~0 while the athlete is actually moving).
+ */
+export function segmentDistance(prev: TrackPoint, cur: TrackPoint): number {
+  const gps = haversine(prev.lat, prev.lng, cur.lat, cur.lng);
+  const dt = (cur.t - prev.t) / 1000;
+  const speedDist = cur.speed != null && dt > 0 ? cur.speed * dt : 0;
+  return gps < 1 && speedDist > 0 ? speedDist : gps;
+}
+
 /** Per-point smoothed ground speed (m/s), index-aligned to the track. */
 export function speedSeries(track: TrackPoint[]): number[] {
   const raw: (number | null)[] = track.map((p, i) => {
@@ -224,7 +236,7 @@ function deriveLaps(track: TrackPoint[], sport: Sport, speeds: number[]): Lap[] 
     for (let i = g.from + 1; i <= g.to; i++) {
       const prev = track[i - 1];
       const cur = track[i];
-      dist += haversine(prev.lat, prev.lng, cur.lat, cur.lng);
+      dist += segmentDistance(prev, cur);
       if (cur.hr != null) hrs.push(cur.hr);
     }
     const durationSec = (track[g.to].t - track[g.from].t) / 1000;
@@ -256,8 +268,7 @@ function longestContinuous(
     // Count a stretch as "continuous" only while at the sport's own effort level
     // (a run goal shouldn't count walk breaks).
     if (cls === runClass) {
-      const prev = track[i - 1];
-      cur += haversine(prev.lat, prev.lng, track[i].lat, track[i].lng);
+      cur += segmentDistance(track[i - 1], track[i]);
       if (cur > best) best = cur;
     } else {
       cur = 0;
@@ -335,6 +346,8 @@ export function deriveSummary(
   );
 
   let distanceM = 0;
+  let movedSegs = 0; // segments with a real GPS displacement (not carried-forward)
+  let speedPts = 0; // points carrying a per-sample speed
   let movingMs = 0;
   let elevGainM = 0;
   let elevLossM = 0;
@@ -368,13 +381,11 @@ export function deriveSummary(
     const prev = track[i - 1];
     const cur = track[i];
     const segMs = cur.t - prev.t;
-    const dtSec = segMs / 1000;
-    const gpsDist = haversine(prev.lat, prev.lng, cur.lat, cur.lng);
-    // When GPS is stalled/absent (position carried forward), the great-circle
-    // distance collapses to ~0 even though the athlete moved — fall back to the
-    // watch's per-sample speed so distance/splits/pace stay whole.
-    const speedDist = cur.speed != null && dtSec > 0 ? cur.speed * dtSec : 0;
-    const segDist = gpsDist < 1 && speedDist > 0 ? speedDist : gpsDist;
+    // GPS distance, or the watch's speed integrated over the interval when GPS
+    // is stalled/absent (see segmentDistance) — keeps distance whole on dropouts.
+    const segDist = segmentDistance(prev, cur);
+    if (haversine(prev.lat, prev.lng, cur.lat, cur.lng) > 0.5) movedSegs++;
+    if (cur.speed != null) speedPts++;
     const segSpeed = segMs > 0 ? segDist / (segMs / 1000) : 0;
 
     distanceM += segDist;
@@ -465,9 +476,17 @@ export function deriveSummary(
   const durationMovingSec = movingMs / 1000;
   const distanceKm = distanceM / 1000;
 
-  // Interval/effort analysis from a smoothed speed series.
+  // Interval/effort analysis from a smoothed speed series. Only derive laps when
+  // we actually have the signal to segment reliably — good per-sample speed
+  // coverage OR near-complete GPS. Otherwise (e.g. a partial-GPS run whose log
+  // carries no speed) we leave laps empty rather than emit a misleading table;
+  // platform-provided laps still override this in the mapper.
   const speeds = speedSeries(track);
-  const laps = deriveLaps(track, sport, speeds);
+  const segCount = track.length - 1;
+  const speedCoverage = segCount > 0 ? speedPts / segCount : 0;
+  const gpsCoverage = segCount > 0 ? movedSegs / segCount : 0;
+  const canDeriveLaps = speedCoverage > 0.6 || gpsCoverage > 0.7;
+  const laps = canDeriveLaps ? deriveLaps(track, sport, speeds) : [];
   const longestContinuousM = longestContinuous(track, sport, speeds);
 
   // Training load: zone-weighted minutes (needs HR zones from a max-HR).
