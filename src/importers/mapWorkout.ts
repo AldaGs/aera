@@ -20,6 +20,8 @@ export interface HealthLogSample {
   speed?: number;   // m/s
   cadence?: number;  // spm (run/walk) or rpm (ride)
   power?: number;    // watts (ride)
+  interval?: number; // interval index (Samsung programmed workout laps)
+  segment?: number;  // segment index within an interval
 }
 /** One lap/segment from the platform's interval data. */
 export interface HealthLap {
@@ -231,6 +233,55 @@ export interface MapOptions {
   weightKg?: number | null;
 }
 
+/**
+ * Reconstruct interval laps from the per-sample `interval` tag that Samsung
+ * writes on programmed-workout logs (warm-up + walk/run repeats). Groups
+ * consecutive samples by interval, then labels each: the first is the warm-up,
+ * and the rest are run vs walk by whether they run longer than the median rep
+ * (the run reps are the longer ones). Per-lap distance/pace aren't in the sample
+ * stream, so they're left null — the value is the timed structure + HR.
+ */
+function buildLapsFromIntervals(
+  log: HealthLogSample[],
+  startMs: number,
+): import('@/model/workout').Lap[] {
+  const sorted = [...log].sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp));
+  type G = { interval: number; start: number; end: number; hrs: number[] };
+  const gs: G[] = [];
+  for (const s of sorted) {
+    if (s.interval == null) continue;
+    const t = Date.parse(s.timestamp);
+    const last = gs[gs.length - 1];
+    if (last && last.interval === s.interval) {
+      last.end = t;
+      if (s.bpm != null) last.hrs.push(s.bpm);
+    } else {
+      gs.push({ interval: s.interval, start: t, end: t, hrs: s.bpm != null ? [s.bpm] : [] });
+    }
+  }
+  if (gs.length < 2) return [];
+
+  const repDurs = gs.slice(1).map((g) => (g.end - g.start) / 1000).sort((a, b) => a - b);
+  const medRep = repDurs.length ? repDurs[Math.floor(repDurs.length / 2)] : 0;
+
+  return gs.map((g, i) => {
+    const durationSec = (g.end - g.start) / 1000;
+    const avgHr = g.hrs.length ? g.hrs.reduce((a, b) => a + b, 0) / g.hrs.length : null;
+    // First interval = warm-up (walk); longer reps = run, shorter = walk.
+    const type: Sport | 'rest' = i === 0 ? 'walk' : durationSec >= medRep ? 'run' : 'walk';
+    return {
+      index: i,
+      type,
+      startMs: g.start - startMs,
+      endMs: g.end - startMs,
+      distanceM: 0,
+      durationSec,
+      avgPaceSecPerKm: null,
+      avgHr,
+    };
+  });
+}
+
 /** Map platform lap payloads onto our Lap shape (uses start/end vs workout start). */
 function mapLaps(
   laps: HealthLap[],
@@ -277,8 +328,13 @@ export function mapHealthWorkout(
     weightKg: opts.weightKg,
   });
 
-  // Platform-provided laps win over the track-derived fallback.
-  if (hw.laps && hw.laps.length > 0) {
+  // Lap source priority: Samsung's per-sample interval tags (exact programmed
+  // structure) → platform lap payload → the track-derived fallback already in
+  // summary.laps.
+  const intervalLaps = hw.log ? buildLapsFromIntervals(hw.log, startMs) : [];
+  if (intervalLaps.length > 0) {
+    summary.laps = intervalLaps;
+  } else if (hw.laps && hw.laps.length > 0) {
     summary.laps = mapLaps(hw.laps, startMs, sport);
   }
 

@@ -133,10 +133,29 @@ export async function rederiveAll(opts: {
     const track = await db.tracks.get(meta.id);
     if (!track || track.points.length < 2) continue;
     const summary = deriveSummary(track.points, meta.sport, opts);
-    // Preserve platform-authoritative fields the derivation can't know.
-    if (meta.summary.calories != null) summary.calories = meta.summary.calories;
-    if (meta.summary.vo2Max != null) summary.vo2Max = meta.summary.vo2Max;
-    if (meta.summary.laps?.length) summary.laps = meta.summary.laps;
+    // Imported workouts (Samsung / Health Connect) carry platform-authoritative
+    // headline values that the track alone can't reproduce — e.g. real distance
+    // and duration when GPS only captured a fragment. Re-deriving from the track
+    // must NOT clobber those, or a recalc silently drops a 2.75 km run to the
+    // 0.64 km GPS happened to record. Preserve them; only refresh the genuinely
+    // track-derived extras (elevation, zones, training load, charts…).
+    const old = meta.summary;
+    if (meta.source !== 'manual') {
+      summary.distanceM = old.distanceM;
+      summary.durationMovingSec = old.durationMovingSec;
+      summary.durationElapsedSec = old.durationElapsedSec;
+      summary.avgPaceSecPerKm = old.avgPaceSecPerKm;
+      summary.avgSpeedKmh = old.avgSpeedKmh;
+      summary.avgHr = old.avgHr;
+      summary.maxHr = old.maxHr;
+      summary.avgCadence = old.avgCadence;
+      summary.maxCadence = old.maxCadence;
+      summary.totalSteps = old.totalSteps;
+    }
+    // These the derivation never knows regardless of source.
+    if (old.calories != null) summary.calories = old.calories;
+    if (old.vo2Max != null) summary.vo2Max = old.vo2Max;
+    if (old.laps?.length) summary.laps = old.laps;
     await db.workouts.put({ ...meta, summary });
     n++;
   }

@@ -152,6 +152,7 @@ class SamsungHealthPlugin : Plugin() {
                         // Combined per-sample log with HR + speed + cadence + power
                         // → [{ timestamp, bpm?, speed?, cadence?, power? }]
                         val logArr = JSArray()
+                        var loggedInterval = false
                         for (log in s.log ?: emptyList()) {
                             val entry = JSObject()
                             entry.put("timestamp", log.timestamp.toString())
@@ -159,8 +160,24 @@ class SamsungHealthPlugin : Plugin() {
                             log.speed?.let { entry.put("speed", it.toDouble()) }
                             log.cadence?.let { entry.put("cadence", it.toDouble()) }
                             log.power?.let { entry.put("power", it.toDouble()) }
+                            // Interval/segment tags mark programmed-workout laps
+                            // (warm-up + walk/run repeats). Read reflectively since
+                            // the accessor name varies / may be absent.
+                            fun readNum(name: String): Double? {
+                                val method = log.javaClass.methods.firstOrNull {
+                                    it.name == name && it.parameterTypes.isEmpty()
+                                } ?: return null
+                                return (method.invoke(log) as? Number)?.toDouble()
+                            }
+                            (readNum("getInterval") ?: readNum("getIntervalIndex"))?.let {
+                                entry.put("interval", it); loggedInterval = true
+                            }
+                            (readNum("getSegment") ?: readNum("getSegmentIndex"))?.let {
+                                entry.put("segment", it)
+                            }
                             logArr.put(entry)
                         }
+                        if (i == 0) Log.d("SamsungHealth", "log has interval tags: $loggedInterval")
                         o.put("log", logArr)
 
                         // Keep legacy heartRate array for backward compat

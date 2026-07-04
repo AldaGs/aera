@@ -241,10 +241,10 @@ export function WorkoutDetail({
           </>
         )}
 
-        {/* Only show intervals we can trust: real per-lap distance (platform laps
-            or a speed-derived split), not the degenerate all-"rest"/0 km fallback
-            that appears when the sample log lacks speed. */}
-        {s.laps && s.laps.some((l) => l.distanceM > 50) && (
+        {/* Show intervals when the laps carry real signal — platform/interval
+            laps (real duration) or speed-derived splits (real distance) — but not
+            the degenerate all-"rest"/0 fallback. */}
+        {s.laps && s.laps.some((l) => l.durationSec > 5 && (l.distanceM > 50 || l.type !== 'rest')) && (
           <section className="panel">
             <div className="panel-head">
               <Repeat size={18} className="icon-grad" />
@@ -281,15 +281,19 @@ export function WorkoutDetail({
           </section>
         )}
 
-        {s.splits.length > 0 && (
-          <section className="panel">
-            <div className="panel-head">
-              <Gauge size={18} className="icon-grad" />
-              <h2>Splits</h2>
-            </div>
-            <SplitsTable splits={s.splits} showPace={showPace} />
-          </section>
-        )}
+        {/* Splits come from the GPS track; hide them when the track only covers a
+            fraction of the real distance (GPS dropout) — otherwise they show a
+            single bogus split at an absurd pace. */}
+        {s.splits.length > 0 &&
+          s.splits.reduce((a, x) => a + x.distanceM, 0) >= s.distanceM * 0.8 && (
+            <section className="panel">
+              <div className="panel-head">
+                <Gauge size={18} className="icon-grad" />
+                <h2>Splits</h2>
+              </div>
+              <SplitsTable splits={s.splits} showPace={showPace} />
+            </section>
+          )}
 
         <button className="btn" onClick={() => onShare(id)}>
           <Share2 size={18} /> Share
@@ -413,7 +417,7 @@ function LapsTable({ laps }: { laps: Lap[] }) {
             <td>
               <span className={`lap-badge lap-badge-${l.type}`}>{LAP_LABEL[l.type]}</span>
             </td>
-            <td>{fmtDistance(l.distanceM)}</td>
+            <td>{l.distanceM > 20 ? fmtDistance(l.distanceM) : '—'}</td>
             <td>{fmtDuration(l.durationSec)}</td>
             <td>{l.avgPaceSecPerKm != null ? fmtPace(l.avgPaceSecPerKm) : '—'}</td>
             <td>{l.avgHr ? Math.round(l.avgHr) : '—'}</td>
