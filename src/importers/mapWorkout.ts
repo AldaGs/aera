@@ -288,13 +288,14 @@ export function mapHealthWorkout(
   // the track alone yields — otherwise a dropped-GPS run under-reports badly (e.g.
   // a 2.75 km watch run shows as the 0.36 km that GPS happened to capture). The
   // track is still kept for the route shape, splits, elevation, zones and charts.
-  const noTrack = track.length < 2;
-  if (hw.distance && hw.distance > 0 && (noTrack || hw.distance > summary.distanceM * 1.05)) {
-    summary.distanceM = hw.distance;
-  }
-  if (hw.duration > 0 && (noTrack || hw.duration > summary.durationElapsedSec * 1.05)) {
+  // The watch's session distance + duration are authoritative for an imported
+  // run and should win outright: the track's own timing is often unreliable
+  // (late GPS lock, bursty fixes, dropouts) which makes track-derived moving time
+  // and pace badly wrong (e.g. 4:25 / 1:36 /km for a real 25:00 / 9:04 /km run).
+  if (hw.distance && hw.distance > 0) summary.distanceM = hw.distance;
+  if (hw.duration > 0) {
     summary.durationMovingSec = hw.duration;
-    summary.durationElapsedSec = hw.duration;
+    summary.durationElapsedSec = Math.max(hw.duration, summary.durationElapsedSec);
   }
   // Recompute pace/speed from the (possibly platform-corrected) distance + time.
   if (summary.distanceM > 0 && summary.durationMovingSec > 0) {
