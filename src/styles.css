@@ -983,6 +983,15 @@ body {
   line-height: 1;
   letter-spacing: -1px;
 }
+.auto-pause-pill {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent);
+  background: #ff5a1f1a;
+  padding: 3px 10px;
+  border-radius: 999px;
+  letter-spacing: 0.3px;
+}
 .recorder-secondary {
   display: grid;
   grid-template-columns: repeat(3, 1fr);

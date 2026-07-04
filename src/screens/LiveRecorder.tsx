@@ -92,7 +92,11 @@ export function LiveRecorder({
       <div className="recorder-body">
         <div className="recorder-primary">
           <span className="recorder-metric-value">{fmtDistance(stats?.distanceM ?? 0)}</span>
-          <span className="stat-label">Distance</span>
+          {stats?.autoPaused ? (
+            <span className="auto-pause-pill">Auto-paused · standing still</span>
+          ) : (
+            <span className="stat-label">Distance</span>
+          )}
         </div>
 
         <div className="recorder-secondary">

@@ -9,16 +9,22 @@ export type RecStatus = 'idle' | 'recording' | 'paused';
 /** Live read-out pushed to the UI on every sample / tick. */
 export interface LiveStats {
   status: RecStatus;
-  elapsedSec: number; // wall time since start, excluding paused spans
+  elapsedSec: number; // moving time since start, excluding manual + auto pauses
   distanceM: number;
   paceSecPerKm: number | null; // run/walk
   speedKmh: number | null; // ride
   currentPaceSecPerKm: number | null; // last ~30s
   points: TrackPoint[];
   lapCount: number;
+  autoPaused: boolean; // GPS says you've stopped moving
 }
 
 const RESUME_KEY = 'aera.activeRecording';
+
+// GPS quality / movement gates.
+const MAX_ACCURACY_M = 25; // drop fixes less certain than this (indoors, cold GPS)
+const STATIONARY_SPEED_MS = 0.5; // below this we're standing still, not moving
+const AUTO_PAUSE_AFTER_MS = 6000; // stationary this long → auto-pause the clock
 
 interface Persisted {
   sport: Sport;
@@ -47,6 +53,11 @@ export class RecordingEngine {
   private distanceM = 0;
   private listeners = new Set<(s: LiveStats) => void>();
   private lastPersist = 0;
+  // Movement filtering / auto-pause bookkeeping (wall-clock ms).
+  private lastFixWall = 0; // last accepted fix
+  private lastMoveWall = 0; // last accepted *moving* fix
+  private autoPaused = false;
+  private autoPauseStartedMs = 0;
 
   constructor(sport: Sport) {
     this.sport = sport;
@@ -61,22 +72,60 @@ export class RecordingEngine {
   start(): void {
     if (this.status !== 'idle') return;
     this.startedAtMs = Date.now();
+    this.lastMoveWall = this.startedAtMs;
     this.status = 'recording';
     this.emit();
   }
 
-  /** Elapsed recording ms (excludes paused spans, including one in progress). */
+  /** Moving-time ms — excludes manual pause + auto-pause (incl. ones in progress). */
   private elapsedMs(now = Date.now()): number {
-    const inProgressPause = this.status === 'paused' ? now - this.pauseStartedMs : 0;
-    return now - this.startedAtMs - this.pausedMs - inProgressPause;
+    let pause = this.pausedMs;
+    if (this.status === 'paused') pause += now - this.pauseStartedMs;
+    if (this.autoPaused) pause += now - this.autoPauseStartedMs;
+    return now - this.startedAtMs - pause;
+  }
+
+  private maxSpeedMs(): number {
+    return this.sport === 'ride' ? 30 : 12.5; // teleport guard (GPS jumps)
   }
 
   addSample(s: LocationSample): void {
     if (this.status !== 'recording') return;
-    const t = this.elapsedMs(s.ts);
-    if (t < 0) return;
+    // Drop low-confidence fixes outright (cold GPS, indoors, urban canyon).
+    if (s.accuracy != null && s.accuracy > MAX_ACCURACY_M) {
+      this.emit();
+      return;
+    }
+
+    const now = s.ts;
     const prev = this.points[this.points.length - 1];
-    if (prev) this.distanceM += haversine(prev.lat, prev.lng, s.lat, s.lng);
+
+    if (prev) {
+      const segDist = haversine(prev.lat, prev.lng, s.lat, s.lng);
+      const wallDt = (now - this.lastFixWall) / 1000;
+      const derivedSpeed = wallDt > 0 ? segDist / wallDt : 0;
+      // Prefer the GPS chip's Doppler speed — it reads ~0 when stationary even
+      // as the position wobbles, which is exactly the couch-drift case.
+      const speed = s.speed != null && s.speed >= 0 ? s.speed : derivedSpeed;
+      const noiseFloor = Math.max(4, (s.accuracy ?? 0) * 0.5);
+
+      const teleport = derivedSpeed > this.maxSpeedMs();
+      const stationary = speed < STATIONARY_SPEED_MS || segDist < noiseFloor;
+      if (teleport || stationary) {
+        this.emit(); // keep the timer ticking; just don't log noise/drift
+        return;
+      }
+      // Genuine movement: resume from any auto-pause and count the segment.
+      this.clearAutoPause();
+      this.lastMoveWall = Date.now();
+      this.distanceM += segDist;
+    } else {
+      this.lastMoveWall = Date.now();
+    }
+
+    this.lastFixWall = now;
+    const t = this.elapsedMs(now);
+    if (t < 0) return;
     this.points.push({
       t,
       lat: s.lat,
@@ -91,8 +140,16 @@ export class RecordingEngine {
     this.emit();
   }
 
+  private clearAutoPause(): void {
+    if (this.autoPaused) {
+      this.pausedMs += Date.now() - this.autoPauseStartedMs;
+      this.autoPaused = false;
+    }
+  }
+
   pause(): void {
     if (this.status !== 'recording') return;
+    this.clearAutoPause();
     this.pauseStartedMs = Date.now();
     this.status = 'paused';
     this.persist();
@@ -113,9 +170,18 @@ export class RecordingEngine {
     this.emit();
   }
 
-  /** A short "ticker" nudge so the timer advances without new GPS fixes. */
+  /** A 1 s ticker: advances the timer and trips auto-pause when movement stops. */
   tick(): void {
-    if (this.status === 'recording') this.emit();
+    if (this.status !== 'recording') return;
+    if (
+      !this.autoPaused &&
+      this.lastMoveWall > 0 &&
+      Date.now() - this.lastMoveWall > AUTO_PAUSE_AFTER_MS
+    ) {
+      this.autoPaused = true;
+      this.autoPauseStartedMs = Date.now();
+    }
+    this.emit();
   }
 
   /** Finish, persist a normalized Workout, and clear resume state. Null if too short. */
@@ -200,6 +266,7 @@ export class RecordingEngine {
       currentPaceSecPerKm: this.recentPace(),
       points: this.points,
       lapCount: this.lapStartsMs.length,
+      autoPaused: this.status === 'recording' && this.autoPaused,
     };
   }
 
@@ -270,6 +337,8 @@ export class RecordingEngine {
       e.points = d.points;
       e.lapStartsMs = d.lapStartsMs ?? [0];
       e.status = d.status === 'paused' ? 'paused' : 'recording';
+      e.lastMoveWall = Date.now();
+      e.lastFixWall = Date.now();
       for (let i = 1; i < e.points.length; i++) {
         e.distanceM += haversine(
           e.points[i - 1].lat,
