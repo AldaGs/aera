@@ -941,6 +941,112 @@ body {
   font-size: 14px;
 }
 
+/* live recorder */
+.resume-banner {
+  margin-bottom: 16px;
+}
+.recorder .overlay-head {
+  align-items: center;
+}
+.gps-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: var(--surface-2);
+}
+.gps-ok {
+  color: #35c98d;
+}
+.gps-wait {
+  color: var(--muted);
+}
+.gps-bad {
+  color: var(--accent);
+}
+.recorder-body {
+  padding: 8px 4px 0;
+}
+.recorder-primary {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 18px 0 20px;
+}
+.recorder-metric-value {
+  font-size: 56px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -1px;
+}
+.recorder-secondary {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-bottom: 18px;
+}
+.recorder-metric {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 12px 8px;
+}
+.recorder-metric-sub {
+  font-size: 22px;
+  font-weight: 800;
+}
+.recorder-map {
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--surface);
+  border: 1px solid var(--line);
+}
+.recorder-controls {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  gap: 12px;
+  padding: 16px 8px calc(16px + env(safe-area-inset-bottom));
+  margin-top: 16px;
+  background: linear-gradient(180deg, transparent, var(--bg) 30%);
+}
+.rec-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  color: var(--text);
+  border-radius: 16px;
+  padding: 14px 18px;
+  font-weight: 700;
+  font-size: 12px;
+  cursor: pointer;
+}
+.rec-main {
+  background: linear-gradient(120deg, var(--accent), var(--accent-2));
+  border: none;
+  color: #fff;
+  padding: 18px 30px;
+}
+.rec-stop {
+  color: var(--accent);
+}
+.rec-btn:disabled {
+  opacity: 0.45;
+}
+
 /* splits + sparkline */
 .spark {
   height: 90px;

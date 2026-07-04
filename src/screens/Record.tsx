@@ -1,9 +1,11 @@
 import { useState } from 'react';
-import { Footprints, Bike, Smartphone, Watch, Play, Plus, PersonStanding } from 'lucide-react';
+import { Footprints, Bike, Smartphone, Watch, Play, Plus, PersonStanding, RotateCcw } from 'lucide-react';
 import type { Sport } from '@/model/workout';
 import { saveWorkout } from '@/db/db';
 import { makeSampleWorkout } from '@/importers/sampleData';
 import { loadConnectivity, saveConnectivity } from '@/store/profile';
+import { LiveRecorder } from '@/screens/LiveRecorder';
+import { RecordingEngine, hasResumableRecording } from '@/record/engine';
 import {
   samsungAvailable,
   requestSamsungAccess,
@@ -20,8 +22,41 @@ export function Record({ onRecorded }: { onRecorded: () => void }) {
   const [sport, setSport] = useState<Sport>('run');
   const [syncing, setSyncing] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  // Live recording: an active engine (fresh or resumed) drives the full-screen view.
+  const [recording, setRecording] = useState<RecordingEngine | null>(null);
+  const [canResume, setCanResume] = useState(hasResumableRecording());
   const conn = loadConnectivity();
   const canSync = samsungAvailable();
+
+  function startRecording() {
+    setRecording(new RecordingEngine(sport));
+  }
+
+  function resumeRecording() {
+    const engine = RecordingEngine.resumeFromStorage();
+    if (engine) setRecording(engine);
+    setCanResume(false);
+  }
+
+  function finishRecording(workoutId: string | null) {
+    setRecording(null);
+    setCanResume(false);
+    if (workoutId) onRecorded();
+  }
+
+  if (recording) {
+    return (
+      <LiveRecorder
+        sport={recording.sport}
+        resumeEngine={recording}
+        onDone={finishRecording}
+        onCancel={() => {
+          setRecording(null);
+          setCanResume(false);
+        }}
+      />
+    );
+  }
 
   async function addSample() {
     await saveWorkout(makeSampleWorkout(sport, Math.floor(Math.random() * 14)));
@@ -108,21 +143,27 @@ export function Record({ onRecorded }: { onRecorded: () => void }) {
       </div>
 
       <div className="record-hero">
-        <button className="record-start" disabled title="Live recording — coming with the GPS backend">
+        <button className="record-start" onClick={startRecording} aria-label="Start recording">
           <Play size={40} fill="currentColor" />
         </button>
         <span className="muted small center">
-          Live {sport === 'run' ? 'run' : sport === 'walk' ? 'walk' : 'ride'} tracking arrives with the GPS backend
+          Start a live {sport === 'run' ? 'run' : sport === 'walk' ? 'walk' : 'ride'} with GPS tracking
         </span>
       </div>
+
+      {canResume && (
+        <button className="btn resume-banner" onClick={resumeRecording}>
+          <RotateCcw size={18} /> Resume unfinished recording
+        </button>
+      )}
 
       <div className="source-list">
         <SourceRow
           icon={Smartphone}
           title="Record on phone"
-          subtitle="GPS tracking from this device"
-          status="Coming soon"
-          enabled={false}
+          subtitle="GPS + background tracking from this device"
+          status="Ready"
+          enabled
         />
         <button
           className={`source-row source-row-btn ${canSync ? '' : 'source-row-disabled'}`}
