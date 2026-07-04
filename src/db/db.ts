@@ -1,5 +1,7 @@
 import Dexie, { type Table } from 'dexie';
 import type { TrackPoint, Workout } from '@/model/workout';
+import type { Goal } from '@/model/goal';
+import { deriveSummary } from '@/metrics/deriveSummary';
 
 // Workout metadata + cached summary live in one table for fast list views.
 // The large raw track lives in a separate table keyed by workout id, so loading
@@ -15,6 +17,7 @@ export interface TrackRecord {
 class AeraDB extends Dexie {
   workouts!: Table<WorkoutMeta, string>;
   tracks!: Table<TrackRecord, string>;
+  goals!: Table<Goal, string>;
 
   constructor() {
     super('aera');
@@ -28,6 +31,20 @@ class AeraDB extends Dexie {
       workouts: 'id, sport, startedAt, athleteId, externalId',
       tracks: 'workoutId',
     });
+    // v3: model extends TrackPoint (speed, power) + WorkoutSummary (cadence,
+    // power, steps, vo2Max). No index changes — the version bump signals the
+    // schema evolution; old rows read new fields as undefined.
+    this.version(3).stores({
+      workouts: 'id, sport, startedAt, athleteId, externalId',
+      tracks: 'workoutId',
+    });
+    // v4: model gains laps/longestContinuousM/trainingLoad on the summary (read
+    // as undefined on old rows until re-derived) + a goals table.
+    this.version(4).stores({
+      workouts: 'id, sport, startedAt, athleteId, externalId',
+      tracks: 'workoutId',
+      goals: 'id, createdAt, deadline',
+    });
   }
 }
 
@@ -39,6 +56,14 @@ export async function saveWorkout(workout: Workout): Promise<void> {
   await db.transaction('rw', db.workouts, db.tracks, async () => {
     await db.workouts.put(meta);
     await db.tracks.put({ workoutId: workout.id, points: track });
+  });
+}
+
+/** Delete a workout and its track. */
+export async function deleteWorkout(id: string): Promise<void> {
+  await db.transaction('rw', db.workouts, db.tracks, async () => {
+    await db.workouts.delete(id);
+    await db.tracks.delete(id);
   });
 }
 
@@ -57,10 +82,63 @@ export async function existingExternalIds(): Promise<Set<string>> {
   return new Set(ids.map((w) => w.externalId).filter((v): v is string => !!v));
 }
 
+/**
+ * Map of externalId → stored workout meta, for import upgrades. Lets the importer
+ * detect a previously-imported summary-only workout (no route) and replace it once
+ * the route/HR become available (e.g. after granting location permission).
+ */
+export async function importedWorkoutsByExternalId(): Promise<Map<string, WorkoutMeta>> {
+  const rows = await db.workouts.where('externalId').notEqual('').toArray();
+  const map = new Map<string, WorkoutMeta>();
+  for (const w of rows) if (w.externalId) map.set(w.externalId, w);
+  return map;
+}
+
 /** Load one full workout including its track. */
 export async function getWorkout(id: string): Promise<Workout | undefined> {
   const meta = await db.workouts.get(id);
   if (!meta) return undefined;
   const track = await db.tracks.get(id);
   return { ...meta, track: track?.points ?? [] };
+}
+
+// --- Goals -----------------------------------------------------------------
+
+export async function listGoals(): Promise<Goal[]> {
+  const all = await db.goals.orderBy('createdAt').toArray();
+  return all.reverse();
+}
+
+export async function saveGoal(goal: Goal): Promise<void> {
+  await db.goals.put(goal);
+}
+
+export async function deleteGoal(id: string): Promise<void> {
+  await db.goals.delete(id);
+}
+
+/**
+ * Re-run deriveSummary over every stored workout so existing rows pick up newly
+ * added summary fields (laps, calories, training load…). Pure over the stored
+ * track. Returns the number of workouts updated.
+ */
+export async function rederiveAll(opts: {
+  maxHr?: number | null;
+  restingHr?: number | null;
+  weightKg?: number | null;
+}): Promise<number> {
+  const metas = await db.workouts.toArray();
+  let n = 0;
+  for (const meta of metas) {
+    const track = await db.tracks.get(meta.id);
+    if (!track || track.points.length < 2) continue;
+    const summary = deriveSummary(track.points, meta.sport, opts);
+    // Preserve platform-authoritative fields the derivation can't know.
+    if (meta.summary.calories != null) summary.calories = meta.summary.calories;
+    if (meta.summary.vo2Max != null) summary.vo2Max = meta.summary.vo2Max;
+    if (meta.summary.laps?.length) summary.laps = meta.summary.laps;
+    await db.workouts.put({ ...meta, summary });
+    n++;
+  }
+  return n;
 }

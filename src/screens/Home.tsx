@@ -11,6 +11,7 @@ import {
   fmtDuration,
   fmtPace,
   fmtSpeed,
+  fmtSteps,
 } from '@/format';
 
 export function Home({
@@ -50,7 +51,11 @@ export function Home({
           <MiniStat value={fmtDistance(week.distanceM)} label="Distance" />
           <MiniStat value={fmtDuration(week.durationSec)} label="Time" />
           <MiniStat value={`${week.count}`} label="Activities" />
-          <MiniStat value={`${Math.round(week.elevGainM)} m`} label="Elev" />
+          {week.totalSteps > 0 ? (
+            <MiniStat value={fmtSteps(week.totalSteps)} label="Steps" />
+          ) : (
+            <MiniStat value={`${Math.round(week.elevGainM)} m`} label="Elev" />
+          )}
         </div>
       </section>
 
@@ -83,12 +88,13 @@ function FeedCard({
   onOpen: () => void;
   onShare: () => void;
 }) {
-  const isRun = w.sport === 'run';
+  const showPace = w.sport === 'run' || w.sport === 'walk';
+  const sportEmoji = w.sport === 'run' ? '🏃' : w.sport === 'walk' ? '🚶' : '🚴';
   return (
     <li className="card feed-card">
       <button className="feed-card-main" onClick={onOpen}>
         <div className="feed-card-head">
-          <div className="avatar-sm">{isRun ? '🏃' : '🚴'}</div>
+          <div className="avatar-sm">{sportEmoji}</div>
           <div className="feed-card-meta">
             <span className="feed-card-title">{w.title}</span>
             <span className="muted small">{fmtDate(w.startedAt)}</span>
@@ -102,8 +108,8 @@ function FeedCard({
           <FeedStat icon={Timer} value={fmtDuration(w.summary.durationMovingSec)} label="Time" />
           <FeedStat
             icon={Gauge}
-            value={isRun ? fmtPace(w.summary.avgPaceSecPerKm) : fmtSpeed(w.summary.avgSpeedKmh)}
-            label={isRun ? 'Pace' : 'Speed'}
+            value={showPace ? fmtPace(w.summary.avgPaceSecPerKm) : fmtSpeed(w.summary.avgSpeedKmh)}
+            label={showPace ? 'Pace' : 'Speed'}
           />
           <FeedStat icon={Mountain} value={`${Math.round(w.summary.elevGainM)} m`} label="Elev" />
         </div>

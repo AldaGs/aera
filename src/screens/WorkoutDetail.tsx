@@ -1,24 +1,58 @@
-import { useEffect, useState } from 'react';
-import { X, Share2, Mountain, Heart, Timer, Gauge, MapPin, Flame } from 'lucide-react';
-import { getWorkout } from '@/db/db';
-import type { Workout } from '@/model/workout';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { X, Share2, Mountain, Heart, Timer, Gauge, MapPin, Flame, Trash2, Zap, Activity, Footprints, Repeat, TrendingUp } from 'lucide-react';
+import { getWorkout, deleteWorkout } from '@/db/db';
+import type { Lap, Sport, Workout } from '@/model/workout';
 import { RouteMap } from '@/ui/RouteMap';
-import { fmtDate, fmtDistance, fmtDuration, fmtPace, fmtSpeed } from '@/format';
+import { TrackChart, type ChartPoint } from '@/ui/TrackChart';
+import { paceSeries, haversine } from '@/metrics/deriveSummary';
+import { fmtDate, fmtDistance, fmtDuration, fmtPace, fmtSpeed, fmtPower, fmtCadence, fmtSteps } from '@/format';
 
 export function WorkoutDetail({
   id,
   onClose,
   onShare,
+  onDeleted,
 }: {
   id: string;
   onClose: () => void;
   onShare: (id: string) => void;
+  onDeleted: () => void;
 }) {
   const [w, setW] = useState<Workout | undefined>();
+  const [deleting, setDeleting] = useState(false);
+  // Shared chart scrubber: the active x (in the chosen domain) and the axis mode.
+  const [scrubX, setScrubX] = useState<number | null>(null);
+  const [xAxis, setXAxis] = useState<'time' | 'distance'>('time');
 
   useEffect(() => {
     getWorkout(id).then(setW);
   }, [id]);
+
+  const track = w?.track ?? [];
+  // Cumulative distance per track index, for the distance x-axis.
+  const cumDist = useMemo(() => {
+    const arr = [0];
+    for (let i = 1; i < track.length; i++) {
+      arr.push(arr[i - 1] + haversine(track[i - 1].lat, track[i - 1].lng, track[i].lat, track[i].lng));
+    }
+    return arr;
+  }, [track]);
+  const xs = useMemo(
+    () => (xAxis === 'time' ? track.map((p) => p.t) : cumDist),
+    [track, cumDist, xAxis],
+  );
+  const formatX = (x: number) =>
+    xAxis === 'time' ? fmtDuration(x / 1000) : `${(x / 1000).toFixed(2)} km`;
+  const buildPoints = (values: (number | null)[]): ChartPoint[] =>
+    values.map((y, i) => ({ x: xs[i], y }));
+
+  async function handleDelete() {
+    if (deleting) return;
+    if (!confirm('Delete this activity? This can\u2019t be undone.')) return;
+    setDeleting(true);
+    await deleteWorkout(id);
+    onDeleted();
+  }
 
   if (!w) {
     return (
@@ -30,14 +64,20 @@ export function WorkoutDetail({
   }
 
   const isRun = w.sport === 'run';
+  const isWalk = w.sport === 'walk';
+  const isRide = w.sport === 'ride';
+  const showPace = isRun || isWalk;
   const s = w.summary;
+
+  const sportEmoji = isRun ? '🏃' : isWalk ? '🚶' : '🚴';
+  const sportLabel = isRun ? 'Run' : isWalk ? 'Walk' : 'Ride';
 
   return (
     <div className="overlay">
       <OverlayHead onClose={onClose} title={w.title} />
       <div className="overlay-body">
         <p className="muted small">
-          {w.sport === 'run' ? '🏃 Run' : '🚴 Ride'} · {fmtDate(w.startedAt)}
+          {sportEmoji} {sportLabel} · {fmtDate(w.startedAt)}
         </p>
 
         <div className="detail-map">
@@ -49,41 +89,165 @@ export function WorkoutDetail({
           <BigStat icon={Timer} value={fmtDuration(s.durationMovingSec)} label="Moving" />
           <BigStat
             icon={Gauge}
-            value={isRun ? fmtPace(s.avgPaceSecPerKm) : fmtSpeed(s.avgSpeedKmh)}
-            label={isRun ? 'Avg pace' : 'Avg speed'}
+            value={showPace ? fmtPace(s.avgPaceSecPerKm) : fmtSpeed(s.avgSpeedKmh)}
+            label={showPace ? 'Avg pace' : 'Avg speed'}
           />
           <BigStat icon={Mountain} value={`${Math.round(s.elevGainM)} m`} label="Elev gain" />
           <BigStat icon={Heart} value={s.avgHr ? `${Math.round(s.avgHr)}` : '—'} label="Avg HR" />
           <BigStat icon={Flame} value={s.maxHr ? `${Math.round(s.maxHr)}` : '—'} label="Max HR" />
-          {isRun && s.gradeAdjustedPaceSecPerKm != null && (
+          {showPace && s.gradeAdjustedPaceSecPerKm != null && (
             <BigStat
               icon={Gauge}
               value={fmtPace(s.gradeAdjustedPaceSecPerKm)}
               label="Grade-adj pace"
             />
           )}
+          {/* Cadence */}
+          {s.avgCadence != null && (
+            <BigStat
+              icon={Activity}
+              value={fmtCadence(s.avgCadence, w.sport)}
+              label="Avg cadence"
+            />
+          )}
+          {s.maxCadence != null && (
+            <BigStat
+              icon={Activity}
+              value={fmtCadence(s.maxCadence, w.sport)}
+              label="Max cadence"
+            />
+          )}
+          {/* Steps (run/walk) */}
+          {showPace && s.totalSteps != null && (
+            <BigStat
+              icon={Footprints}
+              value={fmtSteps(s.totalSteps)}
+              label="Steps"
+            />
+          )}
+          {/* Power (ride) */}
+          {isRide && s.avgPower != null && (
+            <BigStat icon={Zap} value={fmtPower(s.avgPower)} label="Avg power" />
+          )}
+          {isRide && s.maxPower != null && (
+            <BigStat icon={Zap} value={fmtPower(s.maxPower)} label="Max power" />
+          )}
+          {/* VO2 Max */}
+          {s.vo2Max != null && (
+            <BigStat
+              icon={Heart}
+              value={`${s.vo2Max.toFixed(1)}`}
+              label="VO₂ Max"
+            />
+          )}
+          {s.calories != null && (
+            <BigStat icon={Flame} value={`${s.calories}`} label="Calories" />
+          )}
+          {s.trainingLoad != null && (
+            <BigStat icon={TrendingUp} value={`${s.trainingLoad}`} label="Training load" />
+          )}
         </div>
 
-        {s.elevGainM > 0 && (
-          <section className="panel">
-            <div className="panel-head">
-              <Mountain size={18} className="icon-grad" />
-              <h2>Elevation</h2>
+        {track.length >= 2 && (
+          <>
+            <div className="range-toggle chart-axis-toggle">
+              {(['time', 'distance'] as const).map((mode) => (
+                <button
+                  key={mode}
+                  className={`range-opt ${xAxis === mode ? 'range-opt-active' : ''}`}
+                  onClick={() => setXAxis(mode)}
+                >
+                  {mode === 'time' ? 'Time' : 'Distance'}
+                </button>
+              ))}
             </div>
-            <Sparkline values={w.track.map((p) => p.alt).filter((v): v is number => v != null)} />
-          </section>
+
+            {showPace && (
+              <ChartPanel icon={Gauge} title="Pace">
+                <TrackChart
+                  points={buildPoints(paceSeries(track))}
+                  color="url(#aera-grad)"
+                  activeX={scrubX}
+                  onScrub={setScrubX}
+                  format={(v) => fmtPace(v)}
+                  formatX={formatX}
+                />
+              </ChartPanel>
+            )}
+
+            {s.elevGainM > 0 && (
+              <ChartPanel icon={Mountain} title="Elevation">
+                <TrackChart
+                  points={buildPoints(track.map((p) => p.alt))}
+                  activeX={scrubX}
+                  onScrub={setScrubX}
+                  format={(v) => `${Math.round(v)} m`}
+                  formatX={formatX}
+                />
+              </ChartPanel>
+            )}
+
+            {s.avgHr != null && (
+              <ChartPanel icon={Heart} title="Heart rate">
+                <TrackChart
+                  points={buildPoints(track.map((p) => p.hr))}
+                  color="#ff5a1f"
+                  activeX={scrubX}
+                  onScrub={setScrubX}
+                  format={(v) => `${Math.round(v)} bpm`}
+                  formatX={formatX}
+                />
+              </ChartPanel>
+            )}
+
+            {track.some((p) => p.cad != null) && (
+              <ChartPanel icon={Activity} title="Cadence">
+                <TrackChart
+                  points={buildPoints(track.map((p) => p.cad))}
+                  color="#35c98d"
+                  activeX={scrubX}
+                  onScrub={setScrubX}
+                  format={(v) => fmtCadence(v, w.sport)}
+                  formatX={formatX}
+                />
+              </ChartPanel>
+            )}
+
+            {isRide && track.some((p) => p.speed != null) && (
+              <ChartPanel icon={Gauge} title="Speed">
+                <TrackChart
+                  points={buildPoints(track.map((p) => (p.speed != null ? p.speed * 3.6 : null)))}
+                  color="#3ba0ff"
+                  activeX={scrubX}
+                  onScrub={setScrubX}
+                  format={(v) => fmtSpeed(v)}
+                  formatX={formatX}
+                />
+              </ChartPanel>
+            )}
+
+            {isRide && track.some((p) => p.power != null) && (
+              <ChartPanel icon={Zap} title="Power">
+                <TrackChart
+                  points={buildPoints(track.map((p) => p.power))}
+                  color="#f2c14e"
+                  activeX={scrubX}
+                  onScrub={setScrubX}
+                  format={(v) => fmtPower(v)}
+                  formatX={formatX}
+                />
+              </ChartPanel>
+            )}
+          </>
         )}
 
-        {s.avgHr != null && (
+        {s.laps && s.laps.length > 0 && (
           <section className="panel">
             <div className="panel-head">
-              <Heart size={18} className="icon-grad" />
-              <h2>Heart rate</h2>
+              <Repeat size={18} className="icon-grad" />
+              <h2>Intervals</h2>
             </div>
-            <Sparkline
-              values={w.track.map((p) => p.hr).filter((v): v is number => v != null)}
-              color="#ff5a1f"
-            />
+            <LapsTable laps={s.laps} />
           </section>
         )}
 
@@ -120,12 +284,15 @@ export function WorkoutDetail({
               <Gauge size={18} className="icon-grad" />
               <h2>Splits</h2>
             </div>
-            <SplitsTable splits={s.splits} isRun={isRun} />
+            <SplitsTable splits={s.splits} showPace={showPace} />
           </section>
         )}
 
         <button className="btn" onClick={() => onShare(id)}>
           <Share2 size={18} /> Share
+        </button>
+        <button className="btn-ghost btn-danger" onClick={handleDelete} disabled={deleting}>
+          <Trash2 size={18} /> {deleting ? 'Deleting…' : 'Delete activity'}
         </button>
       </div>
     </div>
@@ -195,47 +362,73 @@ function HrZones({ zones }: { zones: number[] }) {
   );
 }
 
-/** Downsampled line chart from a value series. */
-function Sparkline({ values, color = 'url(#aera-grad)' }: { values: number[]; color?: string }) {
-  const W = 400;
-  const H = 90;
-  if (values.length < 2) return <div className="route-empty" style={{ height: H }} />;
-
-  const maxPts = 120;
-  const step = values.length > maxPts ? (values.length - 1) / (maxPts - 1) : 1;
-  const sampled =
-    values.length > maxPts
-      ? Array.from({ length: maxPts }, (_, i) => values[Math.round(i * step)])
-      : values;
-
-  const min = Math.min(...sampled);
-  const max = Math.max(...sampled);
-  const span = Math.max(max - min, 1e-6);
-  const pad = 6;
-
-  const d = sampled
-    .map((v, i) => {
-      const x = pad + (i / (sampled.length - 1)) * (W - pad * 2);
-      const y = pad + (1 - (v - min) / span) * (H - pad * 2);
-      return `${i ? 'L' : 'M'}${x.toFixed(1)} ${y.toFixed(1)}`;
-    })
-    .join(' ');
-
+/** Panel wrapper for an interactive chart. */
+function ChartPanel({
+  icon: IconCmp,
+  title,
+  children,
+}: {
+  icon: typeof MapPin;
+  title: string;
+  children: ReactNode;
+}) {
   return (
-    <svg className="spark" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
-      <path d={d} fill="none" stroke={color} strokeWidth={2.5} strokeLinejoin="round" />
-    </svg>
+    <section className="panel">
+      <div className="panel-head">
+        <IconCmp size={18} className="icon-grad" />
+        <h2>{title}</h2>
+      </div>
+      {children}
+    </section>
   );
 }
 
-function SplitsTable({ splits, isRun }: { splits: import('@/model/workout').Split[]; isRun: boolean }) {
+const LAP_LABEL: Record<Sport | 'rest', string> = {
+  run: 'Run',
+  walk: 'Walk',
+  ride: 'Ride',
+  rest: 'Rest',
+};
+
+function LapsTable({ laps }: { laps: Lap[] }) {
+  return (
+    <table className="splits">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Type</th>
+          <th>Dist</th>
+          <th>Time</th>
+          <th>Pace</th>
+          <th>HR</th>
+        </tr>
+      </thead>
+      <tbody>
+        {laps.map((l) => (
+          <tr key={l.index}>
+            <td>{l.index + 1}</td>
+            <td>
+              <span className={`lap-badge lap-badge-${l.type}`}>{LAP_LABEL[l.type]}</span>
+            </td>
+            <td>{fmtDistance(l.distanceM)}</td>
+            <td>{fmtDuration(l.durationSec)}</td>
+            <td>{l.avgPaceSecPerKm != null ? fmtPace(l.avgPaceSecPerKm) : '—'}</td>
+            <td>{l.avgHr ? Math.round(l.avgHr) : '—'}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function SplitsTable({ splits, showPace }: { splits: import('@/model/workout').Split[]; showPace: boolean }) {
   const max = Math.max(...splits.map((s) => s.paceSecPerKm ?? 0), 1);
   return (
     <table className="splits">
       <thead>
         <tr>
           <th>km</th>
-          <th>{isRun ? 'Pace' : 'Time'}</th>
+          <th>{showPace ? 'Pace' : 'Time'}</th>
           <th></th>
           <th>Elev</th>
           <th>HR</th>
@@ -245,7 +438,7 @@ function SplitsTable({ splits, isRun }: { splits: import('@/model/workout').Spli
         {splits.map((s) => (
           <tr key={s.index}>
             <td>{s.index + 1}</td>
-            <td>{isRun ? fmtPace(s.paceSecPerKm) : fmtDuration(s.durationSec)}</td>
+            <td>{showPace ? fmtPace(s.paceSecPerKm) : fmtDuration(s.durationSec)}</td>
             <td className="split-bar-cell">
               <div
                 className="split-bar"

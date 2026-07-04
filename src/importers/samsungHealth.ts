@@ -1,12 +1,13 @@
 import { Capacitor } from '@capacitor/core';
 import type { Workout } from '@/model/workout';
-import { existingExternalIds, saveWorkout } from '@/db/db';
+import { importedWorkoutsByExternalId, saveWorkout } from '@/db/db';
 import { effectiveMaxHr, loadProfile } from '@/store/profile';
 import { SamsungHealth } from '@/plugins/samsungHealth';
 import { externalKey, mapHealthWorkout } from './mapWorkout';
 
 export interface ImportResult {
   imported: number;
+  upgraded: number; // existing summary-only workouts replaced with a routed version
   skippedDup: number;
   skippedUnsupported: number;
   total: number;
@@ -22,7 +23,7 @@ export function samsungAvailable(): boolean {
 export async function requestSamsungAccess(): Promise<boolean> {
   const { available } = await SamsungHealth.isAvailable();
   if (!available) return false;
-  const { granted } = await SamsungHealth.requestPermissions();
+  const { granted } = await SamsungHealth.requestHealthPermissions();
   return granted;
 }
 
@@ -32,10 +33,12 @@ export async function requestSamsungAccess(): Promise<boolean> {
  */
 export async function importFromSamsungHealth(days = 90): Promise<ImportResult> {
   const { workouts: raw } = await SamsungHealth.readWorkouts({ days });
-  const seen = await existingExternalIds();
-  const maxHr = effectiveMaxHr(loadProfile());
+  const existing = await importedWorkoutsByExternalId();
+  const profile = loadProfile();
+  const maxHr = effectiveMaxHr(profile);
 
   let imported = 0;
+  let upgraded = 0;
   let skippedDup = 0;
   let skippedUnsupported = 0;
   let withRoute = 0;
@@ -44,24 +47,51 @@ export async function importFromSamsungHealth(days = 90): Promise<ImportResult> 
   for (const hw of raw) {
     const typeKey = String(hw.workoutType ?? 'unknown');
     types[typeKey] = (types[typeKey] ?? 0) + 1;
-    if ((hw.route?.length ?? 0) > 0) withRoute++;
+    const hasRoute = (hw.route?.length ?? 0) > 0;
+    if (hasRoute) withRoute++;
 
     const key = externalKey(hw);
-    if (seen.has(key)) {
-      skippedDup++;
-      continue;
+    const prior = existing.get(key);
+    // Already stored: skip, unless the incoming payload now carries a route the
+    // stored one lacks (e.g. re-sync after granting location) — then upgrade it.
+    if (prior) {
+      const priorHasRoute = prior.summary.bounds != null;
+      if (!(hasRoute && !priorHasRoute)) {
+        skippedDup++;
+        continue;
+      }
     }
-    const mapped: Workout | null = mapHealthWorkout(hw, { athleteId: 'me', maxHr });
+    const mapped: Workout | null = mapHealthWorkout(hw, {
+      athleteId: 'me',
+      maxHr,
+      restingHr: profile.restingHr,
+      weightKg: profile.weightKg,
+    });
     if (!mapped) {
       skippedUnsupported++;
       continue;
     }
     // Samsung 'source' distinguishes it from the Health Connect path.
     mapped.source = 'samsung-health';
+    // When upgrading, reuse the existing row id so it replaces in place.
+    if (prior) {
+      mapped.id = prior.id;
+      upgraded++;
+    } else {
+      imported++;
+    }
     await saveWorkout(mapped);
-    seen.add(key);
-    imported++;
+    const { track: _track, ...meta } = mapped;
+    existing.set(key, meta);
   }
 
-  return { imported, skippedDup, skippedUnsupported, total: raw.length, withRoute, types };
+  return {
+    imported,
+    upgraded,
+    skippedDup,
+    skippedUnsupported,
+    total: raw.length,
+    withRoute,
+    types,
+  };
 }

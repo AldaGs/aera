@@ -48,6 +48,10 @@ SDK guide: <https://developer.samsung.com/health/data/guide/developer-mode.html>
 and register `com.aera.app` + the SHA-256 from step 3, with the **Exercise** data
 type, **Read** access.
 
+> **minSdk 29 required.** The Samsung Health Data SDK AAR declares `minSdkVersion 29`,
+> so `android/variables.gradle` sets `minSdkVersion = 29` (was 26 for Health Connect).
+> Fine for us — the Galaxy Watch 4 companion phone runs well above Android 10.
+
 ### 5. Build & run
 ```bash
 npm run build
@@ -57,30 +61,51 @@ npx cap open android     # ▶ Run onto your phone
 
 Then in aera: **Record → Sync from watch** → grant Samsung's permission sheet.
 
-## On-device iteration (expected)
+## Real SDK shape (verified against samsung-health-data-api 1.1.0)
 
-Because the SDK can't be compiled against on the dev machine, 1–2 field names may
-need confirming with Android Studio autocomplete. Everything uncertain is flagged
-in `SamsungHealthPlugin.kt` as `[A] [B] [C]`:
+The initial cut guessed the API; the AAR was then introspected with `javap` (using
+Android Studio's bundled JDK) and the plugin rewritten to the real model:
 
-- **[A] time accessors** — if `p.startTime` / `p.endTime` don't resolve, autocomplete
-  `p.` to find the Instant getters.
-- **[B] field constants** — confirm `DataType.ExerciseType.EXERCISE_TYPE / DURATION /
-  DISTANCE / CALORIES` exist (autocomplete `DataType.ExerciseType.`). Fix any that
-  differ. Also confirm `getValueOrNull`'s reflection finds `getValue`; if not,
-  replace its body with direct `point.getValue(field)` calls.
-- **[C] route + HR** — currently returns empty, so the **first successful build
-  imports summary-level workouts** (type, time, distance, calories) with **no map**.
-  Once summary import works, we add the associated-data read for the GPS route +
-  per-sample heart rate (that unlocks the map, splits, HR zones).
+- `store.readData(EXERCISE)` → `List<HealthDataPoint>`; each point exposes `getUid()`
+  (used as the stable dedup id) and `getValue(field)`.
+- The exercise detail lives in one field: `getValue(DataType.ExerciseType.SESSIONS)`
+  → `List<ExerciseSession>`. There is **no** per-point `DURATION/DISTANCE/CALORIES`
+  (those were wrong guesses; `TOTAL_*` exist only as aggregate operations).
+- `ExerciseSession` has fully-typed getters: `duration: Duration`, `distance: Float?`
+  (m), `calories: Float` (kcal), `exerciseType: PredefinedExerciseType` (enum — its
+  `.name` like `RUNNING/WALKING/BIKING/HIKING` flows straight through `mapSport`),
+  `meanHeartRate`, and crucially **`route: List<ExerciseLocation>`** (lat/lng/alt/ts)
+  + **`log: List<ExerciseLog>`** (per-sample `heartRate`/timestamp).
 
-### Exercise type codes
-`exerciseTypeToString()` maps Samsung codes (1002=run, 1001=walk, 11007=cycle,
-13001=hike). If a synced activity shows as `TYPE_<n>`, tell me the number and I'll
-add it.
+Because route + HR are embedded in the session from the normal read, the **first
+build already imports full workouts with maps** — no separate associated-data call.
+
+> To re-introspect the AAR later:
+> `javap -classpath <cache>/…/samsung-health-data-api-1.1.0-api.jar \`
+> `'com.samsung.android.sdk.health.data.data.entries.ExerciseSession'`
+
+### Note: permission method name
+Capacitor's `Plugin` already defines `requestPermissions(PluginCall)`, so ours is
+named **`requestHealthPermissions`** (matched in `plugins/samsungHealth.ts`).
+
+## Route + HR need their own read permissions
+On-device, EXERCISE-only reads returned sessions with **empty** `getRoute()`/`getLog()`.
+`ExerciseType` exposes no associated-read builder (only `SleepType` does), so route/HR
+are **not** associated data here — they're gated behind separate read permissions, like
+Health Connect's ExerciseRoute grant. The plugin now requests **EXERCISE +
+EXERCISE_LOCATION + HEART_RATE** (EXERCISE required; the other two best-effort so a
+declined location grant still imports summary data).
+
+## Android status bar (edge-to-edge)
+`targetSdk 36` forces edge-to-edge on Android 15, so the WebView draws under the status
+bar. Android does **not** expose the regular status bar via CSS `env(safe-area-inset-*)`
+(only display cutouts), so the fix lives in `MainActivity.java`: an
+`OnApplyWindowInsetsListener` pads the WebView by the system-bar insets.
 
 ## Staging
-1. ✅ Summary-level import (this cut) — proves the SDK path end-to-end.
-2. ⬜ Route + HR associated-data read — full maps/splits/zones.
+1. ✅ Plugin reads full sessions and compiles clean against the real AAR.
+2. ⬜ On-device run: grant EXERCISE + EXERCISE_LOCATION + HEART_RATE on Samsung's sheet,
+   verify an outdoor run imports with its map + HR zones. Confirm `exerciseType.name`
+   values map as expected. (Pre-permission imports have no route — re-sync after.)
 3. ⬜ iOS: `capacitor-health` already covers HealthKit, so Erika's phone reuses the
    normalized model without this Samsung plugin.

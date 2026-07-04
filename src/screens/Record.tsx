@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Footprints, Bike, Smartphone, Watch, Play, Plus } from 'lucide-react';
+import { Footprints, Bike, Smartphone, Watch, Play, Plus, PersonStanding } from 'lucide-react';
 import type { Sport } from '@/model/workout';
 import { saveWorkout } from '@/db/db';
 import { makeSampleWorkout } from '@/importers/sampleData';
@@ -46,11 +46,15 @@ export function Record({ onRecorded }: { onRecorded: () => void }) {
         lastSyncAt: new Date().toISOString(),
       });
 
-      if (r.imported > 0) {
-        setMsg(
-          `Imported ${r.imported} workout${r.imported > 1 ? 's' : ''}` +
-            (r.skippedDup ? ` · ${r.skippedDup} already synced` : ''),
-        );
+      if (r.imported > 0 || r.upgraded > 0) {
+        const parts: string[] = [];
+        if (r.imported > 0)
+          parts.push(`Imported ${r.imported} workout${r.imported > 1 ? 's' : ''}`);
+        if (r.upgraded > 0)
+          parts.push(`upgraded ${r.upgraded} with GPS route`);
+        parts.push(`${r.withRoute} with GPS route total`);
+        if (r.skippedDup) parts.push(`${r.skippedDup} already synced`);
+        setMsg(parts.join(' · '));
         onRecorded();
       } else if (r.total === 0) {
         setMsg(
@@ -88,6 +92,13 @@ export function Record({ onRecorded }: { onRecorded: () => void }) {
           Run
         </button>
         <button
+          className={`sport-opt ${sport === 'walk' ? 'sport-opt-active' : ''}`}
+          onClick={() => setSport('walk')}
+        >
+          <PersonStanding size={22} className={sport === 'walk' ? 'icon-grad' : ''} />
+          Walk
+        </button>
+        <button
           className={`sport-opt ${sport === 'ride' ? 'sport-opt-active' : ''}`}
           onClick={() => setSport('ride')}
         >
@@ -101,7 +112,7 @@ export function Record({ onRecorded }: { onRecorded: () => void }) {
           <Play size={40} fill="currentColor" />
         </button>
         <span className="muted small center">
-          Live {sport === 'run' ? 'run' : 'ride'} tracking arrives with the GPS backend
+          Live {sport === 'run' ? 'run' : sport === 'walk' ? 'walk' : 'ride'} tracking arrives with the GPS backend
         </span>
       </div>
 

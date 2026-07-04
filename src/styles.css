@@ -46,7 +46,8 @@ body {
 .screen {
   max-width: 640px;
   margin: 0 auto;
-  padding: 16px 16px 24px;
+  /* include the status-bar / notch inset so the header clears it on device */
+  padding: calc(16px + env(safe-area-inset-top, 0px)) 16px 24px;
 }
 
 .center {
@@ -110,6 +111,15 @@ body {
   border-radius: 14px;
   font-weight: 600;
   cursor: pointer;
+}
+.btn-danger {
+  margin-top: 10px;
+  color: #ff5a4d;
+  border-color: rgba(255, 90, 77, 0.35);
+}
+.btn-danger:disabled {
+  opacity: 0.6;
+  cursor: default;
 }
 .btn-sm {
   background: var(--surface-2);
@@ -325,7 +335,7 @@ body {
 /* ---------- record screen ---------- */
 .sport-toggle {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr 1fr 1fr;
   gap: 10px;
   margin-bottom: 24px;
 }
@@ -684,8 +694,9 @@ body {
   white-space: nowrap;
 }
 .overlay-body {
+  flex: 1;
   overflow-y: auto;
-  padding: 16px;
+  padding: 16px 16px calc(16px + env(safe-area-inset-bottom, 0px));
   max-width: 640px;
   width: 100%;
   margin: 0 auto;
@@ -747,6 +758,187 @@ body {
 }
 .conn-note {
   margin: 12px 0 0;
+}
+
+/* interactive track chart */
+.track-chart {
+  position: relative;
+  width: 100%;
+  cursor: crosshair;
+  user-select: none;
+}
+.track-chart-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.track-chart-tip {
+  position: absolute;
+  top: -4px;
+  transform: translateX(-50%);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 3px 7px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  pointer-events: none;
+  white-space: nowrap;
+}
+.track-chart-tip-val {
+  font-weight: 800;
+  font-size: 13px;
+}
+.track-chart-tip-x {
+  font-size: 10px;
+  color: var(--muted);
+}
+.chart-axis-toggle {
+  margin-bottom: 12px;
+}
+
+/* interval lap badges */
+.lap-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+}
+.lap-badge-run {
+  background: #ff5a1f22;
+  color: var(--accent);
+}
+.lap-badge-walk {
+  background: #35c98d22;
+  color: #35c98d;
+}
+.lap-badge-ride {
+  background: #3ba0ff22;
+  color: #3ba0ff;
+}
+.lap-badge-rest {
+  background: #8a8a9922;
+  color: var(--muted);
+}
+
+/* panel action (e.g. + new goal) */
+.panel-action {
+  margin-left: auto;
+  background: transparent;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+}
+
+/* goals */
+.goal-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.goal-row-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+.goal-title {
+  font-weight: 700;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.goal-check {
+  color: #35c98d;
+}
+.goal-del {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+.goal-bar {
+  height: 8px;
+  border-radius: 6px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+.goal-fill {
+  height: 100%;
+  border-radius: 6px;
+  background: linear-gradient(90deg, var(--accent-2), var(--accent));
+}
+.goal-fill-done {
+  background: #35c98d;
+}
+.goal-row-bottom {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 6px;
+}
+
+/* goal editor form (vertical fields, overrides the horizontal settings .field) */
+.goal-editor .field {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+}
+.goal-editor .field-label {
+  color: var(--text);
+  font-size: 13px;
+}
+.goal-editor .input {
+  width: 100%;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--text);
+  padding: 10px 12px;
+  font-size: 15px;
+  outline: none;
+}
+.goal-editor .input:focus {
+  border-color: var(--accent-2);
+}
+
+/* insights */
+.insight-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.insight-card {
+  display: flex;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+}
+.insight-icon {
+  flex: none;
+  color: var(--accent);
+}
+.insight-good .insight-icon {
+  color: #35c98d;
+}
+.insight-warn {
+  border-color: #ff5a1f55;
+}
+.insight-warn .insight-icon {
+  color: var(--accent);
+}
+.insight-title {
+  font-weight: 700;
+  font-size: 14px;
 }
 
 /* splits + sparkline */

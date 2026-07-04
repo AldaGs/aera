@@ -12,6 +12,8 @@
   },
   "dependencies": {
     "@capacitor/core": "^8.4.1",
+    "@capacitor/filesystem": "^8.1.2",
+    "@capacitor/share": "^8.0.1",
     "capacitor-health": "^8.1.2",
     "dexie": "^4.0.10",
     "lucide-react": "^1.22.0",

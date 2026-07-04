@@ -1,14 +1,44 @@
+import { Capacitor } from '@capacitor/core';
+import { Filesystem, Directory } from '@capacitor/filesystem';
+import { Share } from '@capacitor/share';
+
+/** Read a blob as a base64 string (no data: prefix). */
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const res = reader.result as string;
+      resolve(res.slice(res.indexOf(',') + 1));
+    };
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+}
+
 /**
- * Share or download a PNG blob. Uses the Web Share API with a file (which on
- * mobile surfaces Instagram, etc.); falls back to a download when unavailable.
- * When Capacitor is added, this is where the native Share plugin slots in.
+ * Share or save a PNG blob.
+ *
+ * On native (Capacitor) the browser's `navigator.share`/`<a download>` don't
+ * work in the WebView, so we write the file to the cache dir and hand its URI to
+ * the native Share sheet (which surfaces Instagram, Save-to-Photos, etc.).
+ * On the web we fall back to the Web Share API, then a plain download.
  */
 export async function shareOrDownloadPng(
   blob: Blob,
   filename: string,
 ): Promise<'shared' | 'downloaded'> {
-  const file = new File([blob], filename, { type: 'image/png' });
+  if (Capacitor.isNativePlatform()) {
+    const data = await blobToBase64(blob);
+    const { uri } = await Filesystem.writeFile({
+      path: filename,
+      data,
+      directory: Directory.Cache,
+    });
+    await Share.share({ title: 'aera', url: uri, dialogTitle: 'Share workout' });
+    return 'shared';
+  }
 
+  const file = new File([blob], filename, { type: 'image/png' });
   const nav = navigator as Navigator & {
     canShare?: (data: ShareData) => boolean;
   };

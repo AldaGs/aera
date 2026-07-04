@@ -2,7 +2,7 @@
 // this shape only. Platform health data (Health Connect / HealthKit) is mapped into
 // it by importers and is never touched directly elsewhere.
 
-export type Sport = 'run' | 'ride';
+export type Sport = 'run' | 'ride' | 'walk';
 export type WorkoutSource =
   | 'health-connect'
   | 'samsung-health'
@@ -16,7 +16,9 @@ export interface TrackPoint {
   lng: number;
   alt: number | null; // meters
   hr: number | null; // bpm, if watch paired HR
-  cad: number | null; // cadence (steps/min run, rpm bike) — optional
+  cad: number | null; // cadence (steps/min run/walk, rpm bike) — optional
+  speed: number | null; // m/s — from ExerciseLog.speed
+  power: number | null; // watts — cycling, from ExerciseLog.power
 }
 
 /** Fastest time to cover a target distance anywhere within the workout. */
@@ -31,6 +33,23 @@ export interface Split {
   durationSec: number;
   paceSecPerKm: number | null;
   elevChangeM: number;
+  avgHr: number | null;
+  partial?: boolean; // final split shorter than 1 km
+}
+
+/**
+ * One lap/segment of an interval workout (e.g. warmup, then walk/run repeats).
+ * Sourced from the platform's lap data when available, else derived from the
+ * track by segmenting on sustained pace changes.
+ */
+export interface Lap {
+  index: number;
+  type: Sport | 'rest'; // 'rest' = recovery walk/stand between efforts
+  startMs: number; // ms offset from workout start
+  endMs: number;
+  distanceM: number;
+  durationSec: number;
+  avgPaceSecPerKm: number | null;
   avgHr: number | null;
 }
 
@@ -56,11 +75,28 @@ export interface WorkoutSummary {
   splits: Split[];
   maxSpeedKmh: number | null;
 
+  // Cadence & power aggregates
+  avgCadence: number | null;   // steps/min (run/walk) or RPM (ride)
+  maxCadence: number | null;
+  avgPower: number | null;     // watts (ride)
+  maxPower: number | null;
+  totalSteps: number | null;   // walk/run — estimated from cadence × duration
+  vo2Max: number | null;       // from Samsung Health, session-level
+
   // Strava-flavored extras:
   gradeAdjustedPaceSecPerKm: number | null; // run — pace normalized for hills
   hrZones: number[] | null; // seconds in each of 5 zones [Z1..Z5]; null if no HR/maxHR
   bestEfforts: BestEffort[]; // fastest 1k/5k/10k within this workout
   bounds: LatLngBounds | null;
+
+  // Interval/lap breakdown (warmup + walk/run repeats). Empty when the workout
+  // has no lap structure.
+  laps: Lap[];
+  // Longest single uninterrupted "moving" run/walk segment, meters — powers the
+  // "run 1 continuous km" style goals.
+  longestContinuousM: number;
+  // Training load (TRIMP-style) for this session; null without HR + maxHR.
+  trainingLoad: number | null;
 
   // Downsampled [lat, lng] path (~48 pts) for cheap feed/list thumbnails,
   // so list views never load the full raw track.

@@ -53,6 +53,10 @@ export function App() {
           id={openWorkoutId}
           onClose={() => setOpenWorkoutId(null)}
           onShare={setShareWorkoutId}
+          onDeleted={() => {
+            setOpenWorkoutId(null);
+            bump();
+          }}
         />
       )}
       {shareWorkoutId && (

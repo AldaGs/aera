@@ -8,7 +8,9 @@ import {
   type Range,
 } from '@/metrics/aggregate';
 import { computeRecords } from '@/metrics/records';
-import { fmtDistance, fmtDuration, fmtDate } from '@/format';
+import { InsightsSection } from '@/screens/Insights';
+import { GoalsSection } from '@/screens/Goals';
+import { fmtDistance, fmtDuration, fmtDate, fmtSteps } from '@/format';
 
 const RANGES: { id: Range; label: string }[] = [
   { id: 'week', label: 'Week' },
@@ -59,7 +61,14 @@ export function Stats({
         <BigStat icon={Timer} value={fmtDuration(totals.durationSec)} label="Moving time" />
         <BigStat icon={Flame} value={`${totals.count}`} label="Activities" />
         <BigStat icon={Mountain} value={`${Math.round(totals.elevGainM)} m`} label="Elevation" />
+        {totals.totalSteps > 0 && (
+          <BigStat icon={Route} value={fmtSteps(totals.totalSteps)} label="Steps" />
+        )}
       </div>
+
+      <InsightsSection workouts={all} />
+
+      <GoalsSection workouts={all} />
 
       <section className="panel">
         <div className="panel-head">
@@ -102,7 +111,7 @@ export function Stats({
           {inRange.map((w) => (
             <li key={w.id}>
               <button className="activity-row" onClick={() => onOpenWorkout(w.id)}>
-                <span className="activity-emoji">{w.sport === 'run' ? '🏃' : '🚴'}</span>
+                <span className="activity-emoji">{w.sport === 'run' ? '🏃' : w.sport === 'walk' ? '🚶' : '🚴'}</span>
                 <div className="activity-info">
                   <span className="activity-title">{w.title}</span>
                   <span className="muted small">{fmtDate(w.startedAt)}</span>

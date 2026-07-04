@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { X, User, Weight, Ruler, Heart, Calendar, Watch, Cog, Activity } from 'lucide-react';
+import { X, User, Weight, Ruler, Heart, Calendar, Watch, Cog, Activity, RefreshCw } from 'lucide-react';
 import {
   loadProfile,
   saveProfile,
@@ -8,6 +8,7 @@ import {
   type Profile as ProfileData,
   type Units,
 } from '@/store/profile';
+import { rederiveAll } from '@/db/db';
 
 /** The avatar chip shown in the Home header. */
 export function ProfileButton({ name, onClick }: { name: string; onClick: () => void }) {
@@ -23,6 +24,22 @@ export function ProfileButton({ name, onClick }: { name: string; onClick: () => 
 export function Profile({ onClose }: { onClose: () => void }) {
   const [p, setP] = useState<ProfileData>(loadProfile());
   const conn = loadConnectivity();
+  const [recalc, setRecalc] = useState<string | null>(null);
+
+  async function recalcMetrics() {
+    setRecalc('Recalculating…');
+    try {
+      const n = await rederiveAll({
+        maxHr: effectiveMaxHr(p),
+        restingHr: p.restingHr,
+        weightKg: p.weightKg,
+      });
+      setRecalc(`Updated ${n} activities`);
+    } catch {
+      setRecalc('Failed');
+    }
+    setTimeout(() => setRecalc(null), 2500);
+  }
 
   function update<K extends keyof ProfileData>(key: K, value: ProfileData[K]) {
     const next = { ...p, [key]: value };
@@ -141,6 +158,15 @@ export function Profile({ onClose }: { onClose: () => void }) {
               ))}
             </div>
           </Field>
+          <Field icon={RefreshCw} label="Recalculate metrics">
+            <button className="btn-sm" onClick={recalcMetrics} disabled={recalc != null}>
+              {recalc ?? 'Run'}
+            </button>
+          </Field>
+          <p className="muted small conn-note">
+            Re-derives laps, calories &amp; training load over stored activities after
+            profile changes.
+          </p>
         </Section>
       </div>
     </div>

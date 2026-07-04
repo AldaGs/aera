@@ -1,7 +1,7 @@
 import type { Workout } from '@/model/workout';
 import { fmtDistance, fmtDuration, fmtPace, fmtSpeed } from '@/format';
 
-export type Template = 'story' | 'square';
+export type Template = 'story' | 'square' | 'poster';
 
 export interface TemplateSpec {
   id: Template;
@@ -13,6 +13,7 @@ export interface TemplateSpec {
 export const TEMPLATES: TemplateSpec[] = [
   { id: 'story', label: 'Story 9:16', w: 1080, h: 1920 },
   { id: 'square', label: 'Square 1:1', w: 1080, h: 1080 },
+  { id: 'poster', label: 'Route', w: 1080, h: 1350 },
 ];
 
 const ACCENT = '#ff5a1f';
@@ -75,6 +76,7 @@ export function renderShareCard(
   spec: TemplateSpec,
   athleteName: string,
 ): string {
+  if (spec.id === 'poster') return renderPoster(w, spec, athleteName);
   const { w: W, h: H } = spec;
   const isStory = spec.id === 'story';
   const s = w.summary;
@@ -122,7 +124,7 @@ export function renderShareCard(
     })
     .join('');
 
-  const sportLabel = w.sport === 'run' ? 'RUN' : 'RIDE';
+  const sportLabel = w.sport === 'run' ? 'RUN' : w.sport === 'walk' ? 'WALK' : 'RIDE';
   const date = new Date(w.startedAt).toLocaleDateString(undefined, {
     weekday: 'long',
     month: 'long',
@@ -174,6 +176,82 @@ export function renderShareCard(
     font-weight="600" text-anchor="end">GAP ${esc(fmtPace(s.gradeAdjustedPaceSecPerKm))}</text>`
       : ''
   }
+</svg>`;
+}
+
+/**
+ * Minimalist "route poster": a single brand-gradient route line filling the
+ * canvas over a clean dark ground, with a slim stat footer. An art-print take on
+ * the workout — the second share style.
+ */
+function renderPoster(w: Workout, spec: TemplateSpec, athleteName: string): string {
+  const { w: W, h: H } = spec;
+  const s = w.summary;
+  const margin = 96;
+  const mapBox = { x: margin, y: margin, w: W - margin * 2, h: H - 360 };
+
+  let routeSvg = '';
+  if (s.routePreview.length >= 2 && s.bounds) {
+    const pts = projectPath(s.routePreview, s.bounds, mapBox, 40);
+    const d = pts
+      .map(([x, y], i) => `${i ? 'L' : 'M'}${x.toFixed(1)} ${y.toFixed(1)}`)
+      .join(' ');
+    const [ex, ey] = pts[pts.length - 1];
+    routeSvg = `
+      <path d="${d}" fill="none" stroke="url(#route)" stroke-width="14"
+        stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="${ex.toFixed(1)}" cy="${ey.toFixed(1)}" r="20" fill="${ACCENT}"/>`;
+  } else {
+    routeSvg = `<text x="${W / 2}" y="${mapBox.y + mapBox.h / 2}" fill="#3a3a46"
+      font-size="40" font-weight="700" text-anchor="middle">No route</text>`;
+  }
+
+  const cells = statCells(w);
+  const colW = (W - margin * 2) / cells.length;
+  const statsY = H - 150;
+  const statsSvg = cells
+    .map((c, i) => {
+      const cx = margin + colW * i + colW / 2;
+      return `
+        <text x="${cx.toFixed(1)}" y="${statsY}" fill="#ffffff" font-size="46"
+          font-weight="800" text-anchor="middle">${esc(c.value)}</text>
+        <text x="${cx.toFixed(1)}" y="${statsY + 40}" fill="#8a8a99" font-size="22"
+          font-weight="600" letter-spacing="2" text-anchor="middle">${esc(
+            c.label.toUpperCase(),
+          )}</text>`;
+    })
+    .join('');
+
+  const date = new Date(w.startedAt).toLocaleDateString(undefined, {
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+  });
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">
+  <defs>
+    <linearGradient id="route" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="${ACCENT}"/>
+      <stop offset="100%" stop-color="${ACCENT_2}"/>
+    </linearGradient>
+    <linearGradient id="brand" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="${ACCENT}"/>
+      <stop offset="100%" stop-color="${ACCENT_2}"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="${W}" height="${H}" fill="#0b0b0f"/>
+  ${routeSvg}
+
+  <text x="${margin}" y="${H - 230}" fill="#ffffff" font-size="40"
+    font-weight="800">${esc(w.title)}</text>
+  <text x="${margin}" y="${H - 190}" fill="#8a8a99" font-size="26"
+    font-weight="600">${esc(athleteName)} · ${esc(date)}</text>
+
+  ${statsSvg}
+
+  <text x="${W / 2}" y="${H - 56}" fill="url(#brand)" font-size="40"
+    font-weight="800" letter-spacing="2" text-anchor="middle">aera</text>
 </svg>`;
 }
 

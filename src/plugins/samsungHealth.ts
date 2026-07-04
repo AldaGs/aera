@@ -11,7 +11,7 @@ export interface SamsungHealthPlugin {
   /** SDK present + Samsung Health installed. */
   isAvailable(): Promise<{ available: boolean }>;
   /** Show Samsung's permission UI; resolves with whether READ was granted. */
-  requestPermissions(): Promise<{ granted: boolean }>;
+  requestHealthPermissions(): Promise<{ granted: boolean }>;
   /** Read exercise sessions (with route + HR) over the last `days`. */
   readWorkouts(options: { days: number }): Promise<{ workouts: HealthWorkout[] }>;
 }

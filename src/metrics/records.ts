@@ -37,13 +37,17 @@ function longestBy(
 export function computeRecords(all: WorkoutMeta[]): PersonalRecord[] {
   const runs = all.filter((w) => w.sport === 'run');
   const rides = all.filter((w) => w.sport === 'ride');
+  const walks = all.filter((w) => w.sport === 'walk');
 
   const fastest1k = fastestEffort(runs, 1000);
   const fastest5k = fastestEffort(runs, 5000);
   const fastest10k = fastestEffort(runs, 10000);
   const longestRun = longestBy(runs, (w) => w.summary.distanceM);
   const longestRide = longestBy(rides, (w) => w.summary.distanceM);
+  const longestWalk = longestBy(walks, (w) => w.summary.distanceM);
   const mostElev = longestBy(all, (w) => w.summary.elevGainM);
+  const highestAvgPower = longestBy(rides, (w) => w.summary.avgPower ?? 0);
+  const fastestWalk1k = fastestEffort(walks, 1000);
 
   return [
     {
@@ -72,9 +76,24 @@ export function computeRecords(all: WorkoutMeta[]): PersonalRecord[] {
       workoutId: longestRide?.workoutId ?? null,
     },
     {
+      label: 'Longest walk',
+      value: longestWalk ? fmtDistance(longestWalk.value) : '—',
+      workoutId: longestWalk?.workoutId ?? null,
+    },
+    {
       label: 'Most elevation',
       value: mostElev && mostElev.value > 0 ? `${Math.round(mostElev.value)} m` : '—',
       workoutId: mostElev?.workoutId ?? null,
+    },
+    {
+      label: 'Fastest walk 1K',
+      value: fastestWalk1k ? fmtDuration(fastestWalk1k.durationSec) : '—',
+      workoutId: fastestWalk1k?.workoutId ?? null,
+    },
+    {
+      label: 'Highest avg power',
+      value: highestAvgPower && highestAvgPower.value > 0 ? `${Math.round(highestAvgPower.value)} W` : '—',
+      workoutId: highestAvgPower?.workoutId ?? null,
     },
   ];
 }

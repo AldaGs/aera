@@ -1,5 +1,7 @@
 // Small display formatters shared across screens.
 
+import type { Sport } from '@/model/workout';
+
 export function fmtDistance(m: number): string {
   return `${(m / 1000).toFixed(2)} km`;
 }
@@ -30,4 +32,19 @@ export function fmtDate(iso: string): string {
     month: 'short',
     day: 'numeric',
   });
+}
+
+export function fmtPower(watts: number | null): string {
+  return watts == null ? '—' : `${Math.round(watts)} W`;
+}
+
+/** Cadence display: spm for run/walk (Strava style), rpm for ride. */
+export function fmtCadence(value: number | null, sport: Sport): string {
+  if (value == null) return '—';
+  return `${Math.round(value)} ${sport === 'ride' ? 'rpm' : 'spm'}`;
+}
+
+export function fmtSteps(count: number | null): string {
+  if (count == null) return '—';
+  return count.toLocaleString();
 }
