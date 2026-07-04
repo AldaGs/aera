@@ -415,7 +415,7 @@ function LapsTable({ laps }: { laps: Lap[] }) {
           <tr key={l.index}>
             <td>{l.index + 1}</td>
             <td>
-              <span className={`lap-badge lap-badge-${l.type}`}>{LAP_LABEL[l.type]}</span>
+              <span className={`lap-badge lap-badge-${l.type}`}>{l.label ?? LAP_LABEL[l.type]}</span>
             </td>
             <td>{l.distanceM > 20 ? fmtDistance(l.distanceM) : '—'}</td>
             <td>{fmtDuration(l.durationSec)}</td>

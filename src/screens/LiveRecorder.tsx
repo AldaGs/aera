@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { Pause, Play, Square, Flag, X, Satellite } from 'lucide-react';
+import { Pause, Play, Square, Flag, X, Satellite, SkipForward } from 'lucide-react';
 import type { LatLngBounds, Sport } from '@/model/workout';
-import { RecordingEngine, type LiveStats } from '@/record/engine';
+import { RecordingEngine, type LiveStats, type PlanProgress } from '@/record/engine';
 import { startLocationUpdates, type LocationWatcher } from '@/record/location';
+import { fireCue } from '@/record/cues';
 import { RouteMap } from '@/ui/RouteMap';
 import { fmtDistance, fmtDuration, fmtPace, fmtSpeed } from '@/format';
 
@@ -32,6 +33,7 @@ export function LiveRecorder({
 
   useEffect(() => {
     const engine = engineRef.current;
+    engine.onCue = (kind) => void fireCue(kind);
     const unsub = engine.subscribe(setStats);
     if (engine.status === 'idle') engine.start();
 
@@ -55,7 +57,19 @@ export function LiveRecorder({
     };
   }, []);
 
+  // Auto-finish when a plan completes in auto-finish mode (engine keeps
+  // stats.plan and sets complete; keep-recording mode clears the plan instead).
+  const autoStopped = useRef(false);
+  useEffect(() => {
+    if (stats?.plan?.complete && !autoStopped.current) {
+      autoStopped.current = true;
+      stop();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stats?.plan?.complete]);
+
   const usesPace = sport === 'run' || sport === 'walk';
+  const plan = stats?.plan;
   const points = stats?.points ?? [];
   const path = points.map((p) => [p.lat, p.lng] as [number, number]);
   const bounds = boundsOf(path);
@@ -90,6 +104,8 @@ export function LiveRecorder({
       </header>
 
       <div className="recorder-body">
+        {plan && !plan.complete && <PlanBanner plan={plan} />}
+
         <div className="recorder-primary">
           <span className="recorder-metric-value">{fmtDistance(stats?.distanceM ?? 0)}</span>
           {stats?.autoPaused ? (
@@ -122,8 +138,8 @@ export function LiveRecorder({
 
       <div className="recorder-controls">
         <button className="rec-btn rec-lap" onClick={() => engineRef.current.lap()} disabled={paused}>
-          <Flag size={22} />
-          <span>Lap</span>
+          {plan ? <SkipForward size={22} /> : <Flag size={22} />}
+          <span>{plan ? 'Next' : 'Lap'}</span>
         </button>
         {paused ? (
           <button className="rec-btn rec-main" onClick={() => engineRef.current.resume()}>
@@ -141,6 +157,28 @@ export function LiveRecorder({
           <span>{saving ? 'Saving…' : 'Finish'}</span>
         </button>
       </div>
+    </div>
+  );
+}
+
+function PlanBanner({ plan }: { plan: PlanProgress }) {
+  const big =
+    plan.targetType === 'manual'
+      ? 'Tap Next'
+      : plan.targetType === 'time'
+        ? fmtDuration(plan.remaining ?? 0)
+        : `${Math.round(plan.remaining ?? 0)} m`;
+  return (
+    <div className={`plan-banner plan-banner-${plan.kind}`}>
+      <div className="plan-banner-top">
+        <span className="plan-banner-label">{plan.label}</span>
+        {plan.rep > 0 && <span className="plan-banner-rep">rep {plan.rep}/{plan.reps}</span>}
+      </div>
+      <div className="plan-banner-big">{big}</div>
+      <div className="plan-banner-bar">
+        <div className="plan-banner-fill" style={{ width: `${Math.round(plan.fraction * 100)}%` }} />
+      </div>
+      {plan.next && <div className="plan-banner-next">Next · {plan.next}</div>}
     </div>
   );
 }

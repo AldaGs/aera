@@ -51,6 +51,7 @@ export interface Lap {
   durationSec: number;
   avgPaceSecPerKm: number | null;
   avgHr: number | null;
+  label?: string; // e.g. "Warm-up", "Work 3/5" — set for planned interval laps
 }
 
 export interface LatLngBounds {

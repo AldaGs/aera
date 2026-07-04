@@ -1,10 +1,13 @@
-import { useState } from 'react';
-import { Footprints, Bike, Smartphone, Watch, Play, Plus, PersonStanding, RotateCcw } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Footprints, Bike, Smartphone, Watch, Play, Plus, PersonStanding, RotateCcw, Repeat, Trash2 } from 'lucide-react';
 import type { Sport } from '@/model/workout';
-import { saveWorkout } from '@/db/db';
+import { saveWorkout, listPlans, deletePlan } from '@/db/db';
+import type { IntervalPlan } from '@/model/intervalPlan';
+import { flattenPlan, planSummary } from '@/model/intervalPlan';
 import { makeSampleWorkout } from '@/importers/sampleData';
 import { loadConnectivity, saveConnectivity } from '@/store/profile';
 import { LiveRecorder } from '@/screens/LiveRecorder';
+import { IntervalBuilder } from '@/screens/IntervalBuilder';
 import { RecordingEngine, hasResumableRecording } from '@/record/engine';
 import {
   samsungAvailable,
@@ -25,11 +28,32 @@ export function Record({ onRecorded }: { onRecorded: () => void }) {
   // Live recording: an active engine (fresh or resumed) drives the full-screen view.
   const [recording, setRecording] = useState<RecordingEngine | null>(null);
   const [canResume, setCanResume] = useState(hasResumableRecording());
+  const [plans, setPlans] = useState<IntervalPlan[]>([]);
+  const [builderOpen, setBuilderOpen] = useState(false);
   const conn = loadConnectivity();
   const canSync = samsungAvailable();
 
+  useEffect(() => {
+    listPlans().then(setPlans);
+  }, []);
+
+  function reloadPlans() {
+    listPlans().then(setPlans);
+  }
+
   function startRecording() {
     setRecording(new RecordingEngine(sport));
+  }
+
+  function startPlan(plan: IntervalPlan) {
+    const engine = new RecordingEngine(plan.sport);
+    engine.setPlan(flattenPlan(plan), plan.autoFinish);
+    setRecording(engine);
+  }
+
+  async function removePlan(id: string) {
+    await deletePlan(id);
+    reloadPlans();
   }
 
   function resumeRecording() {
@@ -157,6 +181,39 @@ export function Record({ onRecorded }: { onRecorded: () => void }) {
         </button>
       )}
 
+      <section className="interval-section">
+        <div className="interval-head">
+          <Repeat size={18} className="icon-grad" />
+          <h2>Interval workouts</h2>
+          <button className="panel-action" onClick={() => setBuilderOpen(true)} aria-label="New interval">
+            <Plus size={18} />
+          </button>
+        </div>
+        {plans.length === 0 ? (
+          <p className="muted small">
+            Build a structured workout — warm-up + repeats of work &amp; recovery. Tap + to create one.
+          </p>
+        ) : (
+          <ul className="plan-list">
+            {plans.map((p) => (
+              <li key={p.id} className="plan-row">
+                <button className="plan-main" onClick={() => startPlan(p)}>
+                  <span className="plan-emoji">{p.sport === 'run' ? '🏃' : p.sport === 'walk' ? '🚶' : '🚴'}</span>
+                  <div className="plan-info">
+                    <span className="plan-name">{p.name}</span>
+                    <span className="muted small">{planSummary(p)}</span>
+                  </div>
+                  <Play size={20} className="icon-grad" />
+                </button>
+                <button className="plan-del" onClick={() => removePlan(p.id)} aria-label="Delete interval">
+                  <Trash2 size={16} />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
       <div className="source-list">
         <SourceRow
           icon={Smartphone}
@@ -190,6 +247,16 @@ export function Record({ onRecorded }: { onRecorded: () => void }) {
       <button className="btn-ghost" onClick={addSample}>
         <Plus size={18} /> Add sample {sport} (dev)
       </button>
+
+      {builderOpen && (
+        <IntervalBuilder
+          onClose={() => setBuilderOpen(false)}
+          onSaved={() => {
+            setBuilderOpen(false);
+            reloadPlans();
+          }}
+        />
+      )}
     </div>
   );
 }

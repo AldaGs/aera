@@ -1,6 +1,7 @@
 import Dexie, { type Table } from 'dexie';
 import type { TrackPoint, Workout } from '@/model/workout';
 import type { Goal } from '@/model/goal';
+import type { IntervalPlan } from '@/model/intervalPlan';
 import { deriveSummary } from '@/metrics/deriveSummary';
 
 // Workout metadata + cached summary live in one table for fast list views.
@@ -18,6 +19,7 @@ class AeraDB extends Dexie {
   workouts!: Table<WorkoutMeta, string>;
   tracks!: Table<TrackRecord, string>;
   goals!: Table<Goal, string>;
+  plans!: Table<IntervalPlan, string>;
 
   constructor() {
     super('aera');
@@ -44,6 +46,13 @@ class AeraDB extends Dexie {
       workouts: 'id, sport, startedAt, athleteId, externalId',
       tracks: 'workoutId',
       goals: 'id, createdAt, deadline',
+    });
+    // v5: reusable structured interval-workout templates.
+    this.version(5).stores({
+      workouts: 'id, sport, startedAt, athleteId, externalId',
+      tracks: 'workoutId',
+      goals: 'id, createdAt, deadline',
+      plans: 'id, createdAt',
     });
   }
 }
@@ -115,6 +124,21 @@ export async function saveGoal(goal: Goal): Promise<void> {
 
 export async function deleteGoal(id: string): Promise<void> {
   await db.goals.delete(id);
+}
+
+// --- Interval plans --------------------------------------------------------
+
+export async function listPlans(): Promise<IntervalPlan[]> {
+  const all = await db.plans.orderBy('createdAt').toArray();
+  return all.reverse();
+}
+
+export async function savePlan(plan: IntervalPlan): Promise<void> {
+  await db.plans.put(plan);
+}
+
+export async function deletePlan(id: string): Promise<void> {
+  await db.plans.delete(id);
 }
 
 /**

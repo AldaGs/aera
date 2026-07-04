@@ -1,10 +1,26 @@
 import type { Lap, Sport, TrackPoint, Workout } from '@/model/workout';
+import type { PlanStep, StepKind } from '@/model/intervalPlan';
 import { deriveSummary, haversine } from '@/metrics/deriveSummary';
 import { saveWorkout } from '@/db/db';
 import { effectiveMaxHr, loadProfile } from '@/store/profile';
 import type { LocationSample } from './location';
 
 export type RecStatus = 'idle' | 'recording' | 'paused';
+
+/** Live progress through the active interval plan. */
+export interface PlanProgress {
+  stepIndex: number;
+  total: number;
+  kind: StepKind;
+  label: string;
+  targetType: 'time' | 'distance' | 'manual';
+  remaining: number | null; // seconds (time) or meters (distance) left; null for manual
+  fraction: number; // 0..1 progress through the current step
+  rep: number; // current work rep (1-based)
+  reps: number; // total work reps
+  next: string | null; // next step label
+  complete: boolean;
+}
 
 /** Live read-out pushed to the UI on every sample / tick. */
 export interface LiveStats {
@@ -17,6 +33,7 @@ export interface LiveStats {
   points: TrackPoint[];
   lapCount: number;
   autoPaused: boolean; // GPS says you've stopped moving
+  plan?: PlanProgress; // present while a structured plan is running
 }
 
 const RESUME_KEY = 'aera.activeRecording';
@@ -26,6 +43,11 @@ const MAX_ACCURACY_M = 25; // drop fixes less certain than this (indoors, cold G
 const STATIONARY_SPEED_MS = 0.5; // below this we're standing still, not moving
 const AUTO_PAUSE_AFTER_MS = 6000; // stationary this long → auto-pause the clock
 
+interface LapMeta {
+  kind: StepKind;
+  label: string;
+}
+
 interface Persisted {
   sport: Sport;
   startedAtMs: number;
@@ -33,6 +55,13 @@ interface Persisted {
   points: TrackPoint[];
   lapStartsMs: number[];
   status: RecStatus;
+  plan?: PlanStep[] | null;
+  planAutoFinish?: boolean;
+  stepIndex?: number;
+  stepStartMs?: number;
+  stepStartDist?: number;
+  lapMeta?: LapMeta[];
+  planComplete?: boolean;
 }
 
 /**
@@ -58,9 +87,32 @@ export class RecordingEngine {
   private lastMoveWall = 0; // last accepted *moving* fix
   private autoPaused = false;
   private autoPauseStartedMs = 0;
+  // Structured interval plan (optional).
+  private plan: PlanStep[] | null = null;
+  private planAutoFinish = true;
+  private stepIndex = 0;
+  private stepStartMs = 0; // elapsed ms at current step start
+  private stepStartDist = 0;
+  private lapMeta: LapMeta[] = []; // one per lapStartsMs boundary
+  private planComplete = false;
+  /** Fired on each step transition (entering `kind`, or 'done' at plan end). */
+  onCue: ((kind: StepKind | 'done') => void) | null = null;
 
   constructor(sport: Sport) {
     this.sport = sport;
+  }
+
+  /** Attach a structured interval plan; call before start(). */
+  setPlan(steps: PlanStep[], autoFinish: boolean): void {
+    this.plan = steps.length ? steps : null;
+    this.planAutoFinish = autoFinish;
+    this.stepIndex = 0;
+    this.stepStartMs = 0;
+    this.stepStartDist = 0;
+    this.planComplete = false;
+    this.lapMeta = this.plan
+      ? [{ kind: this.plan[0].kind, label: this.plan[0].label }]
+      : [];
   }
 
   subscribe(fn: (s: LiveStats) => void): () => void {
@@ -136,7 +188,45 @@ export class RecordingEngine {
       speed: s.speed,
       power: null,
     });
+    this.checkPlanAdvance();
     this.maybePersist();
+    this.emit();
+  }
+
+  /** Advance the plan when the current step's time/distance target is met. */
+  private checkPlanAdvance(): void {
+    if (!this.plan || this.status !== 'recording' || this.planComplete) return;
+    const target = this.plan[this.stepIndex].target;
+    let met = false;
+    if (target.type === 'time') {
+      met = this.elapsedMs() - this.stepStartMs >= target.sec * 1000;
+    } else if (target.type === 'distance') {
+      met = this.distanceM - this.stepStartDist >= target.m;
+    }
+    // 'manual' steps advance via lap()/next().
+    if (met) this.advanceStep();
+  }
+
+  private advanceStep(): void {
+    if (!this.plan || this.planComplete) return;
+    const nextIdx = this.stepIndex + 1;
+    if (nextIdx >= this.plan.length) {
+      this.planComplete = true;
+      this.onCue?.('done');
+      // Keep-recording mode: drop the plan and continue as a free run.
+      if (!this.planAutoFinish) this.plan = null;
+      this.persist();
+      this.emit();
+      return;
+    }
+    const now = this.elapsedMs();
+    this.lapStartsMs.push(now);
+    const next = this.plan[nextIdx];
+    this.lapMeta.push({ kind: next.kind, label: next.label });
+    this.stepIndex = nextIdx;
+    this.stepStartMs = now;
+    this.stepStartDist = this.distanceM;
+    this.onCue?.(next.kind);
     this.emit();
   }
 
@@ -163,17 +253,24 @@ export class RecordingEngine {
     this.emit();
   }
 
-  /** Mark a manual lap boundary at the current elapsed time. */
+  /** Mark a lap boundary / advance the plan (manual steps, or skip early). */
   lap(): void {
     if (this.status === 'idle') return;
+    if (this.plan && !this.planComplete) {
+      this.advanceStep();
+      return;
+    }
     this.lapStartsMs.push(this.elapsedMs());
     this.emit();
   }
 
-  /** A 1 s ticker: advances the timer and trips auto-pause when movement stops. */
+  /** A 1 s ticker: advances the timer, trips auto-pause, and steps the plan. */
   tick(): void {
     if (this.status !== 'recording') return;
+    // Auto-pause is disabled during a plan: standing still in a timed recovery
+    // must not freeze the interval clock.
     if (
+      !this.plan &&
       !this.autoPaused &&
       this.lastMoveWall > 0 &&
       Date.now() - this.lastMoveWall > AUTO_PAUSE_AFTER_MS
@@ -181,6 +278,7 @@ export class RecordingEngine {
       this.autoPaused = true;
       this.autoPauseStartedMs = Date.now();
     }
+    this.checkPlanAdvance();
     this.emit();
   }
 
@@ -196,8 +294,11 @@ export class RecordingEngine {
       restingHr: profile.restingHr,
       weightKg: profile.weightKg,
     });
-    // Manual laps override the derived interval split when the user tapped Lap.
-    if (this.lapStartsMs.length > 1) {
+    // Planned interval laps (typed + labeled) win; else manual laps; else the
+    // derived split from deriveSummary.
+    if (this.lapMeta.length > 0) {
+      summary.laps = this.buildPlannedLaps();
+    } else if (this.lapStartsMs.length > 1) {
       summary.laps = this.buildManualLaps();
     }
 
@@ -253,6 +354,53 @@ export class RecordingEngine {
     return laps;
   }
 
+  /** Type + label the plan boundaries into laps (recovery → 'rest', else sport). */
+  private buildPlannedLaps(): Lap[] {
+    const base = this.buildManualLaps();
+    return base.map((lap, i) => {
+      const meta = this.lapMeta[i];
+      if (!meta) return lap;
+      return {
+        ...lap,
+        type: meta.kind === 'recovery' ? 'rest' : this.sport,
+        label: meta.label,
+      };
+    });
+  }
+
+  private planProgress(): PlanProgress | undefined {
+    if (!this.plan) return undefined;
+    const step = this.plan[this.stepIndex];
+    const t = step.target;
+    let remaining: number | null = null;
+    let fraction = 0;
+    if (t.type === 'time') {
+      remaining = Math.max(0, t.sec - (this.elapsedMs() - this.stepStartMs) / 1000);
+      fraction = t.sec > 0 ? 1 - remaining / t.sec : 0;
+    } else if (t.type === 'distance') {
+      remaining = Math.max(0, t.m - (this.distanceM - this.stepStartDist));
+      fraction = t.m > 0 ? 1 - remaining / t.m : 0;
+    }
+    const reps = this.plan.filter((s) => s.kind === 'work').length;
+    const rep = this.plan
+      .slice(0, this.stepIndex + 1)
+      .filter((s) => s.kind === 'work').length;
+    const next = this.plan[this.stepIndex + 1];
+    return {
+      stepIndex: this.stepIndex,
+      total: this.plan.length,
+      kind: step.kind,
+      label: step.label,
+      targetType: t.type,
+      remaining,
+      fraction,
+      rep,
+      reps,
+      next: next ? next.label : null,
+      complete: this.planComplete,
+    };
+  }
+
   private stats(): LiveStats {
     const elapsedSec = this.status === 'idle' ? 0 : this.elapsedMs() / 1000;
     const km = this.distanceM / 1000;
@@ -267,6 +415,7 @@ export class RecordingEngine {
       points: this.points,
       lapCount: this.lapStartsMs.length,
       autoPaused: this.status === 'recording' && this.autoPaused,
+      plan: this.planProgress(),
     };
   }
 
@@ -311,6 +460,13 @@ export class RecordingEngine {
       points: this.points,
       lapStartsMs: this.lapStartsMs,
       status: this.status,
+      plan: this.plan,
+      planAutoFinish: this.planAutoFinish,
+      stepIndex: this.stepIndex,
+      stepStartMs: this.stepStartMs,
+      stepStartDist: this.stepStartDist,
+      lapMeta: this.lapMeta,
+      planComplete: this.planComplete,
     };
     try {
       localStorage.setItem(RESUME_KEY, JSON.stringify(data));
@@ -339,6 +495,13 @@ export class RecordingEngine {
       e.status = d.status === 'paused' ? 'paused' : 'recording';
       e.lastMoveWall = Date.now();
       e.lastFixWall = Date.now();
+      e.plan = d.plan ?? null;
+      e.planAutoFinish = d.planAutoFinish ?? true;
+      e.stepIndex = d.stepIndex ?? 0;
+      e.stepStartMs = d.stepStartMs ?? 0;
+      e.stepStartDist = d.stepStartDist ?? 0;
+      e.lapMeta = d.lapMeta ?? [];
+      e.planComplete = d.planComplete ?? false;
       for (let i = 1; i < e.points.length; i++) {
         e.distanceM += haversine(
           e.points[i - 1].lat,

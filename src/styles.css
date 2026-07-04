@@ -760,6 +760,182 @@ body {
   margin: 12px 0 0;
 }
 
+/* interval workouts (Record screen) */
+.interval-section {
+  margin: 18px 0;
+}
+.interval-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.interval-head h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+}
+.plan-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.plan-row {
+  display: flex;
+  align-items: stretch;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  overflow: hidden;
+}
+.plan-main {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  padding: 12px 14px;
+  cursor: pointer;
+  text-align: left;
+}
+.plan-emoji {
+  font-size: 22px;
+}
+.plan-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.plan-name {
+  font-weight: 700;
+  font-size: 14px;
+}
+.plan-del {
+  background: transparent;
+  border: none;
+  border-left: 1px solid var(--line);
+  color: var(--muted);
+  padding: 0 14px;
+  cursor: pointer;
+}
+
+/* interval builder */
+.stepper {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.stepper-btn {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.stepper-value {
+  font-weight: 800;
+  font-size: 18px;
+  min-width: 24px;
+  text-align: center;
+}
+.target-field {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+.target-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.seg-sm {
+  padding: 3px;
+  margin: 0;
+}
+.seg-sm .seg-opt {
+  padding: 5px 10px;
+  font-size: 13px;
+}
+.plan-preview {
+  padding: 10px 12px;
+  background: var(--surface-2);
+  border-radius: 10px;
+  text-align: center;
+}
+
+/* live plan banner */
+.plan-banner {
+  border-radius: 16px;
+  padding: 14px 16px;
+  margin-bottom: 16px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+}
+.plan-banner-work {
+  background: linear-gradient(120deg, #ff5a1f22, #ff5a1f0a);
+  border-color: #ff5a1f55;
+}
+.plan-banner-recovery {
+  background: #35c98d18;
+  border-color: #35c98d44;
+}
+.plan-banner-warmup,
+.plan-banner-cooldown {
+  background: #3ba0ff18;
+  border-color: #3ba0ff44;
+}
+.plan-banner-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+.plan-banner-label {
+  font-weight: 800;
+  font-size: 18px;
+}
+.plan-banner-rep {
+  color: var(--muted);
+  font-weight: 700;
+  font-size: 13px;
+}
+.plan-banner-big {
+  font-size: 44px;
+  font-weight: 800;
+  line-height: 1.1;
+  margin: 4px 0 10px;
+  font-variant-numeric: tabular-nums;
+}
+.plan-banner-bar {
+  height: 6px;
+  border-radius: 4px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+.plan-banner-fill {
+  height: 100%;
+  border-radius: 4px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  transition: width 0.3s linear;
+}
+.plan-banner-next {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
 /* interactive track chart */
 .track-chart {
   position: relative;
