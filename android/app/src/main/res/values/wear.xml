@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Capability the watch's CapabilityClient looks up to find this phone. -->
+    <string-array name="android_wear_capabilities">
+        <item>aera_hr_companion</item>
+    </string-array>
+</resources>

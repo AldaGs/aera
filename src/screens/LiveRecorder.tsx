@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import { Pause, Play, Square, Flag, X, Satellite, SkipForward } from 'lucide-react';
+import { Pause, Play, Square, Flag, X, Satellite, SkipForward, Heart } from 'lucide-react';
 import type { LatLngBounds, Sport } from '@/model/workout';
 import { RecordingEngine, type LiveStats, type PlanProgress } from '@/record/engine';
 import { startLocationUpdates, type LocationWatcher } from '@/record/location';
 import { fireCue } from '@/record/cues';
+import { startWatchHr, type WatchHr } from '@/record/hr';
+import { WearBridge } from '@/plugins/wearHr';
 import { RouteMap } from '@/ui/RouteMap';
 import { fmtDistance, fmtDuration, fmtPace, fmtSpeed } from '@/format';
 
@@ -27,8 +29,10 @@ export function LiveRecorder({
     resumeEngine ?? new RecordingEngine(sport),
   );
   const watcherRef = useRef<LocationWatcher | null>(null);
+  const watchHrRef = useRef<WatchHr | null>(null);
   const [stats, setStats] = useState<LiveStats | null>(null);
   const [geoError, setGeoError] = useState<string | null>(null);
+  const [watchConnected, setWatchConnected] = useState(false);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -46,6 +50,19 @@ export function LiveRecorder({
       else w.stop();
     });
 
+    // Live HR from the watch companion (no-op without one) → stamp each point.
+    startWatchHr().then((hr) => {
+      if (!active) {
+        hr.stop();
+        return;
+      }
+      watchHrRef.current = hr;
+      if (hr.connected) {
+        engine.hrProvider = () => hr.latest();
+        setWatchConnected(true);
+      }
+    });
+
     // 1 s ticker so the timer advances between GPS fixes.
     const timer = setInterval(() => engine.tick(), 1000);
 
@@ -54,6 +71,7 @@ export function LiveRecorder({
       unsub();
       clearInterval(timer);
       watcherRef.current?.stop();
+      watchHrRef.current?.stop();
     };
   }, []);
 
@@ -68,9 +86,24 @@ export function LiveRecorder({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stats?.plan?.complete]);
 
+  // Mirror the current interval step to the watch on each transition; the watch
+  // counts the remaining time down locally.
+  useEffect(() => {
+    const p = stats?.plan;
+    if (watchConnected && p && !p.complete) {
+      WearBridge.sendStep({
+        label: p.label,
+        kind: p.kind,
+        remainingSec: Math.round(p.remaining ?? 0),
+      }).catch(() => {});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stats?.plan?.stepIndex, stats?.plan?.complete, watchConnected]);
+
   const usesPace = sport === 'run' || sport === 'walk';
   const plan = stats?.plan;
   const points = stats?.points ?? [];
+  const liveHr = points.length ? points[points.length - 1].hr : null;
   const path = points.map((p) => [p.lat, p.lng] as [number, number]);
   const bounds = boundsOf(path);
 
@@ -98,9 +131,16 @@ export function LiveRecorder({
           <X size={24} />
         </button>
         <h2>{sportName(sport)}</h2>
-        <span className={`gps-chip ${geoError ? 'gps-bad' : path.length ? 'gps-ok' : 'gps-wait'}`}>
-          <Satellite size={14} /> {geoError ? 'No GPS' : path.length ? 'GPS' : 'Acquiring…'}
-        </span>
+        <div className="recorder-chips">
+          {watchConnected && (
+            <span className="gps-chip gps-ok">
+              <Heart size={14} /> Watch
+            </span>
+          )}
+          <span className={`gps-chip ${geoError ? 'gps-bad' : path.length ? 'gps-ok' : 'gps-wait'}`}>
+            <Satellite size={14} /> {geoError ? 'No GPS' : path.length ? 'GPS' : 'Acquiring…'}
+          </span>
+        </div>
       </header>
 
       <div className="recorder-body">
@@ -123,6 +163,9 @@ export function LiveRecorder({
           />
           {usesPace && (
             <Metric label="Now" value={fmtPace(stats?.currentPaceSecPerKm ?? null)} />
+          )}
+          {watchConnected && (
+            <Metric label="Heart rate" value={liveHr != null ? `${Math.round(liveHr)} bpm` : '—'} />
           )}
           {(stats?.lapCount ?? 1) > 1 && (
             <Metric label="Laps" value={`${(stats?.lapCount ?? 1) - 1}`} />

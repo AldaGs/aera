@@ -10,8 +10,9 @@ import com.getcapacitor.BridgeActivity;
 public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
-        // Register our app-local Samsung Health plugin before the bridge starts.
+        // Register our app-local plugins before the bridge starts.
         registerPlugin(SamsungHealthPlugin.class);
+        registerPlugin(WearBridgePlugin.class);
         super.onCreate(savedInstanceState);
 
         // targetSdk 35+ forces edge-to-edge on Android 15, so the content draws

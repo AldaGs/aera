@@ -1,5 +1,6 @@
 import { Capacitor } from '@capacitor/core';
 import { Haptics, ImpactStyle, NotificationType } from '@capacitor/haptics';
+import { WearBridge } from '@/plugins/wearHr';
 import type { StepKind } from '@/model/intervalPlan';
 
 /** A transition cue kind — the step you're entering, or 'done' at plan end. */
@@ -14,6 +15,8 @@ export type CueKind = StepKind | 'done';
  */
 export async function fireCue(kind: CueKind): Promise<void> {
   if (!Capacitor.isNativePlatform()) return;
+  // Buzz the watch too (no-op when no companion is connected).
+  WearBridge.sendCue({ kind }).catch(() => {});
   try {
     switch (kind) {
       case 'work':
@@ -38,7 +41,6 @@ export async function fireCue(kind: CueKind): Promise<void> {
   } catch {
     // Haptics unavailable on this device — silently ignore.
   }
-  // TODO(watch companion): forward `kind` to the Wear OS app via the Data Layer.
 }
 
 function delay(ms: number): Promise<void> {

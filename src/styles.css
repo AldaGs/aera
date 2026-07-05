@@ -1159,6 +1159,11 @@ body {
   line-height: 1;
   letter-spacing: -1px;
 }
+.recorder-chips {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
 .auto-pause-pill {
   font-size: 12px;
   font-weight: 700;
