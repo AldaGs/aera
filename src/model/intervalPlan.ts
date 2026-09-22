@@ -26,6 +26,15 @@ export interface IntervalPlan {
   cooldown: StepTarget | null;
   autoFinish: boolean; // stop+save on completion, vs keep recording untimed
   createdAt: string;
+  /** ISO timestamp of the last edit; missing on old rows (fall back to createdAt). */
+  updatedAt?: string;
+  /** Tombstone: deleted locally or remotely, kept around so sync can propagate it. */
+  deleted?: boolean;
+}
+
+/** `updatedAt`, defaulting to `createdAt` for plans saved before it existed. */
+export function planUpdatedAt(p: IntervalPlan): string {
+  return p.updatedAt ?? p.createdAt;
 }
 
 /** One concrete step the engine walks through. */

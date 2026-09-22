@@ -5,6 +5,8 @@ import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
+import android.util.Log
+import com.google.android.gms.wearable.DataEventBuffer
 import com.google.android.gms.wearable.MessageEvent
 import com.google.android.gms.wearable.WearableListenerService
 import org.json.JSONObject
@@ -30,6 +32,14 @@ class PhoneListener : WearableListenerService() {
                 stopService(Intent(this, HrService::class.java))
             }
         }
+    }
+
+    // Plans are read straight from the DataClient (PlanStore) where needed (e.g.
+    // MainActivity.onResume); this just confirms delivery in logcat for now.
+    override fun onDataChanged(dataEvents: DataEventBuffer) {
+        val planChanges = dataEvents.count { it.dataItem.uri.path.orEmpty().startsWith("/aera/plan/") }
+        if (planChanges > 0) Log.d("aera-wear", "plan DataItems changed: $planChanges")
+        dataEvents.release()
     }
 
     private fun vibrate(kind: String) {

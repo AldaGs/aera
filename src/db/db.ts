@@ -128,17 +128,26 @@ export async function deleteGoal(id: string): Promise<void> {
 
 // --- Interval plans --------------------------------------------------------
 
+/** Non-deleted plans, newest first. Includes sync tombstones' survivors only. */
 export async function listPlans(): Promise<IntervalPlan[]> {
   const all = await db.plans.orderBy('createdAt').toArray();
-  return all.reverse();
+  return all.filter((p) => !p.deleted).reverse();
 }
 
-export async function savePlan(plan: IntervalPlan): Promise<void> {
-  await db.plans.put(plan);
+export async function savePlan(plan: IntervalPlan): Promise<IntervalPlan> {
+  const saved = { ...plan, updatedAt: new Date().toISOString() };
+  await db.plans.put(saved);
+  return saved;
 }
 
-export async function deletePlan(id: string): Promise<void> {
-  await db.plans.delete(id);
+/** Tombstone the plan (kept as a row with `deleted: true`) so sync can propagate
+ * the delete instead of the row silently vanishing on one side. */
+export async function deletePlan(id: string): Promise<IntervalPlan | undefined> {
+  const existing = await db.plans.get(id);
+  if (!existing) return undefined;
+  const tombstone = { ...existing, deleted: true, updatedAt: new Date().toISOString() };
+  await db.plans.put(tombstone);
+  return tombstone;
 }
 
 /**

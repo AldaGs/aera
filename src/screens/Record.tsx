@@ -15,7 +15,8 @@ import {
   importFromSamsungHealth,
 } from '@/importers/samsungHealth';
 import { WearBridge } from '@/plugins/wearHr';
-import { Capacitor } from '@capacitor/core';
+import { Capacitor, type PluginListenerHandle } from '@capacitor/core';
+import { syncPlans, mergeIncomingPlan, pushOnePlan } from '@/sync/planSync';
 
 /**
  * Record tab. Live phone-GPS recording is still pending; the working data path
@@ -43,7 +44,10 @@ export function Record({ onRecorded }: { onRecorded: () => void }) {
 
     if (Capacitor.isNativePlatform()) {
       let active = true;
-      let handle: any = null;
+      const handles: PluginListenerHandle[] = [];
+
+      syncPlans().then(reloadPlans);
+
       WearBridge.addListener('cmd', (e) => {
         if (e.cmd === 'start') {
           // If not already recording, start one
@@ -57,13 +61,20 @@ export function Record({ onRecorded }: { onRecorded: () => void }) {
           });
         }
       }).then((h) => {
-        if (active) handle = h;
+        if (active) handles.push(h);
+        else h.remove();
+      }).catch(() => {});
+
+      WearBridge.addListener('planChanged', (e) => {
+        mergeIncomingPlan(e.json).then(reloadPlans);
+      }).then((h) => {
+        if (active) handles.push(h);
         else h.remove();
       }).catch(() => {});
 
       return () => {
         active = false;
-        if (handle) handle.remove();
+        for (const h of handles) h.remove();
       };
     }
   }, []);
@@ -108,7 +119,8 @@ export function Record({ onRecorded }: { onRecorded: () => void }) {
   }
 
   async function removePlan(id: string) {
-    await deletePlan(id);
+    const tombstone = await deletePlan(id);
+    if (tombstone) pushOnePlan(tombstone);
     reloadPlans();
   }
 

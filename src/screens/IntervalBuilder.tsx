@@ -4,6 +4,7 @@ import { savePlan } from '@/db/db';
 import type { IntervalPlan, StepTarget } from '@/model/intervalPlan';
 import { planSummary } from '@/model/intervalPlan';
 import type { Sport } from '@/model/workout';
+import { pushOnePlan } from '@/sync/planSync';
 
 const SPORTS: { id: Sport; label: string }[] = [
   { id: 'run', label: 'Run' },
@@ -40,7 +41,8 @@ export function IntervalBuilder({
       name: name.trim() || defaultName(preview),
       createdAt: new Date().toISOString(),
     };
-    await savePlan(plan);
+    const saved = await savePlan(plan);
+    pushOnePlan(saved);
     onSaved();
   }
 

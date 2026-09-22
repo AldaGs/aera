@@ -13,6 +13,11 @@ export interface CmdEvent {
   cmd: string;
 }
 
+export interface PlanChangedEvent {
+  /** The changed plan, as JSON (matches the stored IntervalPlan shape). */
+  json: string;
+}
+
 /**
  * Bridge to the native WearBridge plugin (Kotlin) that talks to the aera Wear OS
  * companion over the Wearable Data Layer. The watch streams HR to the phone; the
@@ -27,6 +32,10 @@ export interface WearBridgePlugin {
   sendCue(opts: { kind: string }): Promise<void>;
   /** Tell the watch to stop measuring (run finished). */
   stopWatch(): Promise<void>;
+  /** Write/replace the DataItem for one interval plan (JSON string). */
+  putPlan(opts: { json: string }): Promise<void>;
+  /** Read every plan DataItem currently synced (each a JSON string). */
+  getAllPlans(): Promise<{ plans: string[] }>;
   /** Subscribe to live HR samples pushed from the watch. */
   addListener(
     eventName: 'hr',
@@ -39,6 +48,11 @@ export interface WearBridgePlugin {
   addListener(
     eventName: 'cmd',
     listener: (event: CmdEvent) => void,
+  ): Promise<PluginListenerHandle>;
+  /** Fires when a plan DataItem changes (edited on watch, or synced in). */
+  addListener(
+    eventName: 'planChanged',
+    listener: (event: PlanChangedEvent) => void,
   ): Promise<PluginListenerHandle>;
 }
 

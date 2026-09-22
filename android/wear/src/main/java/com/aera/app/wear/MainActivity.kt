@@ -8,6 +8,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import android.widget.Button
 import android.widget.TextView
 import android.os.VibrationEffect
@@ -70,6 +71,8 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         handler.post(refresh)
+        // Phase 2 verification: confirms plan DataItems reached the watch.
+        Thread { Log.d("aera-wear", "synced plans: ${PlanStore.listPlans(this).size}") }.start()
     }
 
     override fun onPause() {
