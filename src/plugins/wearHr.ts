@@ -5,6 +5,14 @@ export interface HrEvent {
   bpm: number;
 }
 
+export interface CadenceEvent {
+  cad: number;
+}
+
+export interface CmdEvent {
+  cmd: string;
+}
+
 /**
  * Bridge to the native WearBridge plugin (Kotlin) that talks to the aera Wear OS
  * companion over the Wearable Data Layer. The watch streams HR to the phone; the
@@ -23,6 +31,14 @@ export interface WearBridgePlugin {
   addListener(
     eventName: 'hr',
     listener: (event: HrEvent) => void,
+  ): Promise<PluginListenerHandle>;
+  addListener(
+    eventName: 'cadence',
+    listener: (event: CadenceEvent) => void,
+  ): Promise<PluginListenerHandle>;
+  addListener(
+    eventName: 'cmd',
+    listener: (event: CmdEvent) => void,
   ): Promise<PluginListenerHandle>;
 }
 

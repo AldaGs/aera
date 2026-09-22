@@ -1,15 +1,15 @@
 import { Capacitor } from '@capacitor/core';
-import type { PluginListenerHandle } from '@capacitor/core';
 import { WearBridge } from '@/plugins/wearHr';
 
 /** A live HR source: read the latest bpm, and stop it when recording ends. */
-export interface WatchHr {
+export interface WatchSensors {
   connected: boolean;
-  latest: () => number | null;
+  latestHr: () => number | null;
+  latestCadence: () => number | null;
   stop: () => Promise<void>;
 }
 
-const OFF: WatchHr = { connected: false, latest: () => null, stop: async () => {} };
+const OFF: WatchSensors = { connected: false, latestHr: () => null, latestCadence: () => null, stop: async () => {} };
 
 /**
  * Start listening for live HR from the Wear OS companion. No-op off-device or when
@@ -17,24 +17,34 @@ const OFF: WatchHr = { connected: false, latest: () => null, stop: async () => {
  * `latest()` is what you wire into `RecordingEngine.hrProvider`. HR arrives ~1/s
  * and goes stale if the watch drops off, so samples older than ~8 s read as null.
  */
-export async function startWatchHr(): Promise<WatchHr> {
+export async function startWatchSensors(): Promise<WatchSensors> {
   if (!Capacitor.isNativePlatform()) return OFF;
   try {
     const { connected } = await WearBridge.isWatchConnected();
     if (!connected) return OFF;
 
     let bpm: number | null = null;
-    let lastAt = 0;
-    const handle: PluginListenerHandle = await WearBridge.addListener('hr', (e) => {
+    let cad: number | null = null;
+    let lastHrAt = 0;
+    let lastCadAt = 0;
+    
+    const handleHr = await WearBridge.addListener('hr', (e) => {
       bpm = e.bpm;
-      lastAt = Date.now();
+      lastHrAt = Date.now();
+    });
+    
+    const handleCad = await WearBridge.addListener('cadence', (e) => {
+      cad = e.cad;
+      lastCadAt = Date.now();
     });
 
     return {
       connected: true,
-      latest: () => (Date.now() - lastAt < 8000 ? bpm : null),
+      latestHr: () => (Date.now() - lastHrAt < 8000 ? bpm : null),
+      latestCadence: () => (Date.now() - lastCadAt < 8000 ? cad : null),
       stop: async () => {
-        await handle.remove();
+        await handleHr.remove();
+        await handleCad.remove();
         try {
           await WearBridge.stopWatch();
         } catch {

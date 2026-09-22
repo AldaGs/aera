@@ -13,8 +13,9 @@ export interface PlanProgress {
   total: number;
   kind: StepKind;
   label: string;
-  targetType: 'time' | 'distance' | 'manual';
+  targetType: 'time' | 'distance' | 'either' | 'manual';
   remaining: number | null; // seconds (time) or meters (distance) left; null for manual
+  remainingUnit: 'sec' | 'm' | null; // which unit `remaining` is expressed in
   fraction: number; // 0..1 progress through the current step
   rep: number; // current work rep (1-based)
   reps: number; // total work reps
@@ -34,6 +35,7 @@ export interface LiveStats {
   lapCount: number;
   autoPaused: boolean; // GPS says you've stopped moving
   plan?: PlanProgress; // present while a structured plan is running
+  liveHr: number | null; // latest HR independent of GPS movement
 }
 
 const RESUME_KEY = 'aera.activeRecording';
@@ -73,6 +75,7 @@ export class RecordingEngine {
   sport: Sport;
   status: RecStatus = 'idle';
   hrProvider: (() => number | null) | null = null;
+  cadProvider: (() => number | null) | null = null;
 
   private points: TrackPoint[] = [];
   private startedAtMs = 0;
@@ -163,14 +166,21 @@ export class RecordingEngine {
 
       const teleport = derivedSpeed > this.maxSpeedMs();
       const stationary = speed < STATIONARY_SPEED_MS || segDist < noiseFloor;
-      if (teleport || stationary) {
-        this.emit(); // keep the timer ticking; just don't log noise/drift
+      if (teleport) {
+        this.emit(); // ignore crazy teleport jumps completely
         return;
       }
-      // Genuine movement: resume from any auto-pause and count the segment.
-      this.clearAutoPause();
-      this.lastMoveWall = Date.now();
-      this.distanceM += segDist;
+      if (stationary) {
+        // We're standing still (or indoors). Keep the timer and HR track going,
+        // but freeze the coordinates at the previous point to prevent GPS drift
+        // from accumulating fake distance.
+        s = { ...s, lat: prev.lat, lng: prev.lng, speed: 0 };
+      } else {
+        // Genuine movement: resume from any auto-pause and count the segment.
+        this.clearAutoPause();
+        this.lastMoveWall = Date.now();
+        this.distanceM += segDist;
+      }
     } else {
       this.lastMoveWall = Date.now();
     }
@@ -184,7 +194,7 @@ export class RecordingEngine {
       lng: s.lng,
       alt: s.alt != null && Number.isFinite(s.alt) ? s.alt : null,
       hr: this.hrProvider?.() ?? null,
-      cad: null,
+      cad: this.cadProvider?.() ?? null,
       speed: s.speed,
       power: null,
     });
@@ -202,6 +212,10 @@ export class RecordingEngine {
       met = this.elapsedMs() - this.stepStartMs >= target.sec * 1000;
     } else if (target.type === 'distance') {
       met = this.distanceM - this.stepStartDist >= target.m;
+    } else if (target.type === 'either') {
+      const timeMet = this.elapsedMs() - this.stepStartMs >= target.sec * 1000;
+      const distMet = this.distanceM - this.stepStartDist >= target.m;
+      met = timeMet || distMet;
     }
     // 'manual' steps advance via lap()/next().
     if (met) this.advanceStep();
@@ -267,10 +281,13 @@ export class RecordingEngine {
   /** A 1 s ticker: advances the timer, trips auto-pause, and steps the plan. */
   tick(): void {
     if (this.status !== 'recording') return;
-    // Auto-pause is disabled during a plan: standing still in a timed recovery
-    // must not freeze the interval clock.
+    // Auto-pause is disabled for time/manual steps: standing still in a timed
+    // recovery must not freeze the interval clock. Distance/either steps (and
+    // free runs / a finished plan) still auto-pause at red lights etc.
+    const stepTarget = this.plan && !this.planComplete ? this.plan[this.stepIndex].target.type : null;
+    const autoPauseAllowed = stepTarget === null || stepTarget === 'distance' || stepTarget === 'either';
     if (
-      !this.plan &&
+      autoPauseAllowed &&
       !this.autoPaused &&
       this.lastMoveWall > 0 &&
       Date.now() - this.lastMoveWall > AUTO_PAUSE_AFTER_MS
@@ -286,6 +303,19 @@ export class RecordingEngine {
   async finish(): Promise<Workout | null> {
     this.status = 'idle';
     clearResume();
+    
+    // Synthesize a final point if we only ever got one fix but time elapsed,
+    // which happens indoors or if the user starts before a solid GPS lock.
+    if (this.points.length === 1 && this.elapsedMs() > 5000) {
+      const p = this.points[0];
+      this.points.push({
+        ...p,
+        t: this.elapsedMs(),
+        hr: this.hrProvider?.() ?? null,
+        speed: 0,
+      });
+    }
+    
     if (this.points.length < 2) return null;
 
     const profile = loadProfile();
@@ -373,13 +403,30 @@ export class RecordingEngine {
     const step = this.plan[this.stepIndex];
     const t = step.target;
     let remaining: number | null = null;
+    let remainingUnit: 'sec' | 'm' | null = null;
     let fraction = 0;
     if (t.type === 'time') {
       remaining = Math.max(0, t.sec - (this.elapsedMs() - this.stepStartMs) / 1000);
+      remainingUnit = 'sec';
       fraction = t.sec > 0 ? 1 - remaining / t.sec : 0;
     } else if (t.type === 'distance') {
       remaining = Math.max(0, t.m - (this.distanceM - this.stepStartDist));
+      remainingUnit = 'm';
       fraction = t.m > 0 ? 1 - remaining / t.m : 0;
+    } else if (t.type === 'either') {
+      const remSec = Math.max(0, t.sec - (this.elapsedMs() - this.stepStartMs) / 1000);
+      const remM = Math.max(0, t.m - (this.distanceM - this.stepStartDist));
+      const fracTime = t.sec > 0 ? 1 - remSec / t.sec : 0;
+      const fracDist = t.m > 0 ? 1 - remM / t.m : 0;
+      // Report whichever unit is closer to done; fraction reflects the leader.
+      if (fracTime >= fracDist) {
+        remaining = remSec;
+        remainingUnit = 'sec';
+      } else {
+        remaining = remM;
+        remainingUnit = 'm';
+      }
+      fraction = Math.max(fracTime, fracDist);
     }
     const reps = this.plan.filter((s) => s.kind === 'work').length;
     const rep = this.plan
@@ -393,6 +440,7 @@ export class RecordingEngine {
       label: step.label,
       targetType: t.type,
       remaining,
+      remainingUnit,
       fraction,
       rep,
       reps,
@@ -416,6 +464,7 @@ export class RecordingEngine {
       lapCount: this.lapStartsMs.length,
       autoPaused: this.status === 'recording' && this.autoPaused,
       plan: this.planProgress(),
+      liveHr: this.hrProvider?.() ?? null,
     };
   }
 

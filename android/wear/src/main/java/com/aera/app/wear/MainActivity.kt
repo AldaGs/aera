@@ -10,7 +10,12 @@ import android.os.Handler
 import android.os.Looper
 import android.widget.Button
 import android.widget.TextView
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.content.Context
 import androidx.core.content.ContextCompat
+import com.google.android.gms.tasks.Tasks
+import com.google.android.gms.wearable.Wearable
 
 /**
  * The aera watch screen: a big live HR number, the current interval step +
@@ -24,6 +29,8 @@ class MainActivity : Activity() {
     private lateinit var countdownText: TextView
     private lateinit var toggle: Button
     private val handler = Handler(Looper.getMainLooper())
+    private var lastVibratedSec = -1
+    private val vibrator by lazy { getSystemService(Context.VIBRATOR_SERVICE) as Vibrator }
 
     private val refresh = object : Runnable {
         override fun run() {
@@ -33,6 +40,18 @@ class MainActivity : Activity() {
             val rem = AeraState.remainingNow()
             countdownText.text = if (label.isNotEmpty() && rem > 0) fmt(rem) else ""
             toggle.text = getString(if (AeraState.measuring) R.string.stop else R.string.start)
+            
+            if (rem in 1..5 && rem != lastVibratedSec) {
+                lastVibratedSec = rem
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    vibrator.vibrate(VibrationEffect.createOneShot(100, VibrationEffect.DEFAULT_AMPLITUDE))
+                } else {
+                    vibrator.vibrate(100)
+                }
+            } else if (rem <= 0 || rem > 5) {
+                lastVibratedSec = -1
+            }
+            
             handler.postDelayed(this, 500)
         }
     }
@@ -62,11 +81,26 @@ class MainActivity : Activity() {
         val intent = Intent(this, HrService::class.java)
         if (AeraState.measuring) {
             stopService(intent)
+            sendCmd("stop")
         } else if (hasBodySensors()) {
             ContextCompat.startForegroundService(this, intent)
+            sendCmd("start")
         } else {
             ensurePermissions()
         }
+    }
+
+    private fun sendCmd(cmd: String) {
+        Thread {
+            try {
+                val nodes = Tasks.await(Wearable.getNodeClient(this).connectedNodes)
+                val mc = Wearable.getMessageClient(this)
+                val payload = cmd.toByteArray()
+                for (n in nodes) mc.sendMessage(n.id, "/aera/cmd", payload)
+            } catch (e: Exception) {
+                // Ignore
+            }
+        }.start()
     }
 
     private fun hasBodySensors() =
@@ -83,6 +117,15 @@ class MainActivity : Activity() {
             needed.add(Manifest.permission.POST_NOTIFICATIONS)
         }
         if (needed.isNotEmpty()) requestPermissions(needed.toTypedArray(), 1)
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == 1 && hasBodySensors()) {
+            val intent = Intent(this, HrService::class.java)
+            ContextCompat.startForegroundService(this, intent)
+            sendCmd("start")
+        }
     }
 
     private fun fmt(sec: Int): String {

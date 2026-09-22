@@ -80,9 +80,9 @@ export function IntervalBuilder({
           </div>
         </label>
 
-        <TargetEditor label="Warm-up" value={warmup} onChange={setWarmup} allowNone allowDistance />
-        <TargetEditor label="Work" value={work} onChange={(v) => v && setWork(v)} allowDistance allowManual />
-        <TargetEditor label="Recovery" value={recovery} onChange={setRecovery} allowNone />
+        <TargetEditor label="Warm-up" value={warmup} onChange={setWarmup} allowNone allowDistance allowEither />
+        <TargetEditor label="Work" value={work} onChange={(v) => v && setWork(v)} allowDistance allowEither allowManual />
+        <TargetEditor label="Recovery" value={recovery} onChange={setRecovery} allowNone allowDistance allowEither />
 
         <div className="field">
           <span className="field-label">Repeats</span>
@@ -97,7 +97,7 @@ export function IntervalBuilder({
           </div>
         </div>
 
-        <TargetEditor label="Cooldown" value={cooldown} onChange={setCooldown} allowNone allowDistance />
+        <TargetEditor label="Cooldown" value={cooldown} onChange={setCooldown} allowNone allowDistance allowEither />
 
         <label className="field">
           <span className="field-label">Auto-finish when done</span>
@@ -120,6 +120,7 @@ function TargetEditor({
   allowNone,
   allowDistance,
   allowManual,
+  allowEither,
 }: {
   label: string;
   value: StepTarget | null;
@@ -127,13 +128,16 @@ function TargetEditor({
   allowNone?: boolean;
   allowDistance?: boolean;
   allowManual?: boolean;
+  allowEither?: boolean;
 }) {
   const type = value?.type ?? 'none';
+  const [km, setKm] = useState(false);
 
   function pick(next: string) {
     if (next === 'none') onChange(null);
     else if (next === 'time') onChange({ type: 'time', sec: 120 });
     else if (next === 'distance') onChange({ type: 'distance', m: 400 });
+    else if (next === 'either') onChange({ type: 'either', sec: 120, m: 400 });
     else onChange({ type: 'manual' });
   }
 
@@ -145,6 +149,7 @@ function TargetEditor({
           {allowNone && <TypeOpt id="none" cur={type} onPick={pick} text="Off" />}
           <TypeOpt id="time" cur={type} onPick={pick} text="Time" />
           {allowDistance && <TypeOpt id="distance" cur={type} onPick={pick} text="Dist" />}
+          {allowEither && <TypeOpt id="either" cur={type} onPick={pick} text="Either" />}
           {allowManual && <TypeOpt id="manual" cur={type} onPick={pick} text="Lap" />}
         </div>
       </div>
@@ -158,16 +163,64 @@ function TargetEditor({
         />
       )}
       {value?.type === 'distance' && (
-        <input
-          className="input"
-          type="number"
-          value={value.m}
-          onChange={(e) => onChange({ type: 'distance', m: parseInt(e.target.value, 10) || 0 })}
-          placeholder="meters"
-          inputMode="numeric"
+        <DistanceInput
+          m={value.m}
+          km={km}
+          setKm={setKm}
+          onChange={(m) => onChange({ type: 'distance', m })}
         />
       )}
+      {value?.type === 'either' && (
+        <>
+          <input
+            className="input"
+            value={fmtSec(value.sec)}
+            onChange={(e) => onChange({ ...value, sec: parseSec(e.target.value) })}
+            placeholder="mm:ss"
+            inputMode="numeric"
+          />
+          <DistanceInput
+            m={value.m}
+            km={km}
+            setKm={setKm}
+            onChange={(m) => onChange({ ...value, m })}
+          />
+        </>
+      )}
       {value?.type === 'manual' && <span className="muted small">Ends when you tap Next</span>}
+    </div>
+  );
+}
+
+/** Meters input with a km/m unit toggle; always reports/stores meters. */
+function DistanceInput({
+  m,
+  km,
+  setKm,
+  onChange,
+}: {
+  m: number;
+  km: boolean;
+  setKm: (v: boolean) => void;
+  onChange: (m: number) => void;
+}) {
+  return (
+    <div className="target-head">
+      <input
+        className="input"
+        type="number"
+        value={km ? m / 1000 : m}
+        onChange={(e) => {
+          const v = parseFloat(e.target.value) || 0;
+          onChange(km ? Math.round(v * 1000) : Math.round(v));
+        }}
+        placeholder={km ? 'km' : 'meters'}
+        inputMode="decimal"
+      />
+      <div className="seg seg-sm">
+        <TypeOpt id="m" cur={km ? 'km' : 'm'} onPick={() => setKm(false)} text="m" />
+        <TypeOpt id="km" cur={km ? 'km' : 'm'} onPick={() => setKm(true)} text="km" />
+      </div>
     </div>
   );
 }
@@ -180,12 +233,12 @@ function TypeOpt({ id, cur, onPick, text }: { id: string; cur: string; onPick: (
   );
 }
 
-function fmtSec(sec: number): string {
+export function fmtSec(sec: number): string {
   const m = Math.floor(sec / 60);
   const s = sec % 60;
   return `${m}:${String(s).padStart(2, '0')}`;
 }
-function parseSec(text: string): number {
+export function parseSec(text: string): number {
   if (text.includes(':')) {
     const [m, s] = text.split(':').map((n) => parseInt(n, 10) || 0);
     return m * 60 + s;

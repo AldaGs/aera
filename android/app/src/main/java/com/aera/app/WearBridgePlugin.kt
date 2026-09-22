@@ -28,6 +28,20 @@ class WearBridgePlugin : Plugin() {
             data.put("bpm", bpm)
             p.notifyListeners("hr", data)
         }
+
+        fun emitCadence(cad: Int) {
+            val p = instance ?: return
+            val data = JSObject()
+            data.put("cad", cad)
+            p.notifyListeners("cadence", data)
+        }
+
+        fun emitCmd(cmd: String) {
+            val p = instance ?: return
+            val data = JSObject()
+            data.put("cmd", cmd)
+            p.notifyListeners("cmd", data)
+        }
     }
 
     override fun load() {

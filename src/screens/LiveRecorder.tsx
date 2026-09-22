@@ -4,7 +4,7 @@ import type { LatLngBounds, Sport } from '@/model/workout';
 import { RecordingEngine, type LiveStats, type PlanProgress } from '@/record/engine';
 import { startLocationUpdates, type LocationWatcher } from '@/record/location';
 import { fireCue } from '@/record/cues';
-import { startWatchHr, type WatchHr } from '@/record/hr';
+import { startWatchSensors, type WatchSensors } from '@/record/hr';
 import { WearBridge } from '@/plugins/wearHr';
 import { RouteMap } from '@/ui/RouteMap';
 import { fmtDistance, fmtDuration, fmtPace, fmtSpeed } from '@/format';
@@ -29,7 +29,7 @@ export function LiveRecorder({
     resumeEngine ?? new RecordingEngine(sport),
   );
   const watcherRef = useRef<LocationWatcher | null>(null);
-  const watchHrRef = useRef<WatchHr | null>(null);
+  const watchSensorsRef = useRef<WatchSensors | null>(null);
   const [stats, setStats] = useState<LiveStats | null>(null);
   const [geoError, setGeoError] = useState<string | null>(null);
   const [watchConnected, setWatchConnected] = useState(false);
@@ -50,15 +50,16 @@ export function LiveRecorder({
       else w.stop();
     });
 
-    // Live HR from the watch companion (no-op without one) → stamp each point.
-    startWatchHr().then((hr) => {
+    // Live HR and cadence from the watch companion (no-op without one) → stamp each point.
+    startWatchSensors().then((sensors) => {
       if (!active) {
-        hr.stop();
+        sensors.stop();
         return;
       }
-      watchHrRef.current = hr;
-      if (hr.connected) {
-        engine.hrProvider = () => hr.latest();
+      watchSensorsRef.current = sensors;
+      if (sensors.connected) {
+        engine.hrProvider = () => sensors.latestHr();
+        engine.cadProvider = () => sensors.latestCadence();
         setWatchConnected(true);
       }
     });
@@ -71,7 +72,7 @@ export function LiveRecorder({
       unsub();
       clearInterval(timer);
       watcherRef.current?.stop();
-      watchHrRef.current?.stop();
+      watchSensorsRef.current?.stop();
     };
   }, []);
 
@@ -103,7 +104,7 @@ export function LiveRecorder({
   const usesPace = sport === 'run' || sport === 'walk';
   const plan = stats?.plan;
   const points = stats?.points ?? [];
-  const liveHr = points.length ? points[points.length - 1].hr : null;
+  const liveHr = stats?.liveHr ?? null;
   const path = points.map((p) => [p.lat, p.lng] as [number, number]);
   const bounds = boundsOf(path);
 
@@ -208,9 +209,9 @@ function PlanBanner({ plan }: { plan: PlanProgress }) {
   const big =
     plan.targetType === 'manual'
       ? 'Tap Next'
-      : plan.targetType === 'time'
-        ? fmtDuration(plan.remaining ?? 0)
-        : `${Math.round(plan.remaining ?? 0)} m`;
+      : plan.remainingUnit === 'm'
+        ? `${Math.round(plan.remaining ?? 0)} m`
+        : fmtDuration(plan.remaining ?? 0);
   return (
     <div className={`plan-banner plan-banner-${plan.kind}`}>
       <div className="plan-banner-top">

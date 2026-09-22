@@ -9,9 +9,19 @@ import com.google.android.gms.wearable.WearableListenerService
  */
 class WearMessageListener : WearableListenerService() {
     override fun onMessageReceived(event: MessageEvent) {
-        if (event.path == "/aera/hr") {
-            val bpm = String(event.data).trim().toDoubleOrNull()?.toInt() ?: return
-            WearBridgePlugin.emitHr(bpm)
+        when (event.path) {
+            "/aera/hr" -> {
+                val bpm = String(event.data).trim().toDoubleOrNull()?.toInt() ?: return
+                WearBridgePlugin.emitHr(bpm)
+            }
+            "/aera/cadence" -> {
+                val cad = String(event.data).trim().toDoubleOrNull()?.toInt() ?: return
+                WearBridgePlugin.emitCadence(cad)
+            }
+            "/aera/cmd" -> {
+                val cmd = String(event.data).trim()
+                WearBridgePlugin.emitCmd(cmd)
+            }
         }
     }
 }

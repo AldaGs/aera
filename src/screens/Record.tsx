@@ -2,18 +2,20 @@ import { useEffect, useState } from 'react';
 import { Footprints, Bike, Smartphone, Watch, Play, Plus, PersonStanding, RotateCcw, Repeat, Trash2 } from 'lucide-react';
 import type { Sport } from '@/model/workout';
 import { saveWorkout, listPlans, deletePlan } from '@/db/db';
-import type { IntervalPlan } from '@/model/intervalPlan';
+import type { IntervalPlan, StepTarget } from '@/model/intervalPlan';
 import { flattenPlan, planSummary } from '@/model/intervalPlan';
 import { makeSampleWorkout } from '@/importers/sampleData';
 import { loadConnectivity, saveConnectivity } from '@/store/profile';
 import { LiveRecorder } from '@/screens/LiveRecorder';
-import { IntervalBuilder } from '@/screens/IntervalBuilder';
+import { IntervalBuilder, fmtSec, parseSec } from '@/screens/IntervalBuilder';
 import { RecordingEngine, hasResumableRecording } from '@/record/engine';
 import {
   samsungAvailable,
   requestSamsungAccess,
   importFromSamsungHealth,
 } from '@/importers/samsungHealth';
+import { WearBridge } from '@/plugins/wearHr';
+import { Capacitor } from '@capacitor/core';
 
 /**
  * Record tab. Live phone-GPS recording is still pending; the working data path
@@ -30,11 +32,40 @@ export function Record({ onRecorded }: { onRecorded: () => void }) {
   const [canResume, setCanResume] = useState(hasResumableRecording());
   const [plans, setPlans] = useState<IntervalPlan[]>([]);
   const [builderOpen, setBuilderOpen] = useState(false);
+  const [goalType, setGoalType] = useState<'none' | 'time' | 'distance' | 'either'>('none');
+  const [goalSec, setGoalSec] = useState(1800);
+  const [goalKm, setGoalKm] = useState(5);
   const conn = loadConnectivity();
   const canSync = samsungAvailable();
 
   useEffect(() => {
     listPlans().then(setPlans);
+
+    if (Capacitor.isNativePlatform()) {
+      let active = true;
+      let handle: any = null;
+      WearBridge.addListener('cmd', (e) => {
+        if (e.cmd === 'start') {
+          // If not already recording, start one
+          setRecording((current) => {
+            if (!current) {
+              const engine = new RecordingEngine('run'); // default to run from watch
+              engine.start();
+              return engine;
+            }
+            return current;
+          });
+        }
+      }).then((h) => {
+        if (active) handle = h;
+        else h.remove();
+      }).catch(() => {});
+
+      return () => {
+        active = false;
+        if (handle) handle.remove();
+      };
+    }
   }, []);
 
   function reloadPlans() {
@@ -42,7 +73,32 @@ export function Record({ onRecorded }: { onRecorded: () => void }) {
   }
 
   function startRecording() {
-    setRecording(new RecordingEngine(sport));
+    const needSec = goalType === 'time' || goalType === 'either';
+    const needDist = goalType === 'distance' || goalType === 'either';
+    // A zero goal would be met on the first tick and end the run instantly.
+    if (goalType === 'none' || (needSec && goalSec <= 0) || (needDist && goalKm <= 0)) {
+      setRecording(new RecordingEngine(sport));
+      return;
+    }
+    const target: StepTarget =
+      goalType === 'time'
+        ? { type: 'time', sec: goalSec }
+        : goalType === 'distance'
+          ? { type: 'distance', m: Math.round(goalKm * 1000) }
+          : { type: 'either', sec: goalSec, m: Math.round(goalKm * 1000) };
+    const plan: IntervalPlan = {
+      id: '',
+      name: 'Quick goal',
+      sport,
+      warmup: null,
+      work: target,
+      recovery: null,
+      repeats: 1,
+      cooldown: null,
+      autoFinish: true,
+      createdAt: new Date().toISOString(),
+    };
+    startPlan(plan);
   }
 
   function startPlan(plan: IntervalPlan) {
@@ -164,6 +220,35 @@ export function Record({ onRecorded }: { onRecorded: () => void }) {
           <Bike size={22} className={sport === 'ride' ? 'icon-grad' : ''} />
           Ride
         </button>
+      </div>
+
+      <div className="field">
+        <span className="field-label">Goal</span>
+        <div className="seg seg-sm">
+          <button className={`seg-opt ${goalType === 'none' ? 'seg-opt-active' : ''}`} onClick={() => setGoalType('none')}>None</button>
+          <button className={`seg-opt ${goalType === 'time' ? 'seg-opt-active' : ''}`} onClick={() => setGoalType('time')}>Time</button>
+          <button className={`seg-opt ${goalType === 'distance' ? 'seg-opt-active' : ''}`} onClick={() => setGoalType('distance')}>Distance</button>
+          <button className={`seg-opt ${goalType === 'either' ? 'seg-opt-active' : ''}`} onClick={() => setGoalType('either')}>Either</button>
+        </div>
+        {(goalType === 'time' || goalType === 'either') && (
+          <input
+            className="input"
+            value={fmtSec(goalSec)}
+            onChange={(e) => setGoalSec(parseSec(e.target.value))}
+            placeholder="mm:ss"
+            inputMode="numeric"
+          />
+        )}
+        {(goalType === 'distance' || goalType === 'either') && (
+          <input
+            className="input"
+            type="number"
+            value={goalKm}
+            onChange={(e) => setGoalKm(parseFloat(e.target.value) || 0)}
+            placeholder="km"
+            inputMode="decimal"
+          />
+        )}
       </div>
 
       <div className="record-hero">

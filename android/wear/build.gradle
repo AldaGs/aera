@@ -4,6 +4,10 @@ apply plugin: 'org.jetbrains.kotlin.android'
 android {
     namespace = "com.aera.app.wear"
     compileSdk = rootProject.ext.compileSdkVersion
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_21
+        targetCompatibility JavaVersion.VERSION_21
+    }
     kotlinOptions {
         jvmTarget = "21"
     }
@@ -11,7 +15,10 @@ android {
         // MUST match the phone app id so the Wearable Data Layer pairs the two.
         applicationId "com.aera.app"
         minSdkVersion 30
-        targetSdkVersion rootProject.ext.targetSdkVersion
+        // Pin below 35: on Android 15+ the classic BODY_SENSORS runtime prompt is
+        // ignored (body sensors moved under Health permissions), so Health Services
+        // never gets granted. targetSdk 34 keeps the normal BODY_SENSORS dialog.
+        targetSdkVersion 34
         versionCode 1
         versionName "1.0"
     }
@@ -29,7 +36,12 @@ dependencies {
     implementation 'androidx.lifecycle:lifecycle-service:2.8.7'
     // Live HR without Samsung partnership (Wear OS 3+).
     implementation 'androidx.health:health-services-client:1.0.0'
+    // Guava puts com.google.common.util.concurrent.ListenableFuture on the compile
+    // classpath — Health Services' *Async calls return it.
+    implementation 'com.google.guava:guava:33.3.1-android'
     // Wearable Data Layer to reach the phone.
     implementation 'com.google.android.gms:play-services-wearable:18.2.0'
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1'
+    // Ongoing Activity for persistence.
+    implementation 'androidx.wear:wear-ongoing:1.0.0'
 }

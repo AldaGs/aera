@@ -7,6 +7,7 @@ export type StepKind = 'warmup' | 'work' | 'recovery' | 'cooldown';
 export type StepTarget =
   | { type: 'time'; sec: number }
   | { type: 'distance'; m: number }
+  | { type: 'either'; sec: number; m: number } // whichever is reached first
   | { type: 'manual' };
 
 /**
@@ -65,6 +66,10 @@ export function fmtTarget(t: StepTarget): string {
   }
   if (t.type === 'distance') {
     return t.m >= 1000 ? `${(t.m / 1000).toFixed(2)} km` : `${t.m} m`;
+  }
+  if (t.type === 'either') {
+    const dist = t.m >= 1000 ? `${(t.m / 1000).toFixed(2)} km` : `${t.m} m`;
+    return `${fmtTarget({ type: 'time', sec: t.sec })} or ${dist}`;
   }
   return 'manual';
 }
