@@ -1,67 +1,72 @@
 package com.aera.app.wear
 
-import android.app.Activity
 import android.content.Intent
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
-import android.widget.Button
-import android.widget.LinearLayout
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.focusable
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
+import androidx.wear.compose.foundation.lazy.items
+import androidx.wear.compose.foundation.lazy.rememberScalingLazyListState
+import androidx.wear.compose.foundation.rotary.RotaryScrollableDefaults
+import androidx.wear.compose.foundation.rotary.rotaryScrollable
+import androidx.wear.compose.material.Chip
+import androidx.wear.compose.material.ChipDefaults
+import androidx.wear.compose.material.PositionIndicator
+import androidx.wear.compose.material.Scaffold
+import androidx.wear.compose.material.Text
+import androidx.wear.compose.material.TimeText
+import com.aera.app.wear.ui.theme.AeraTheme
+import com.aera.app.wear.ui.theme.Nocturne
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
 /**
- * Plan list: "Quick goal" (opens the quick-goal editor) followed by every synced
- * plan (see PlanStore). Tapping a plan starts it on the phone via /aera/cmd.
+ * Plan list (1g/2c): Free run, then synced plans, then Quick goal. Tapping a
+ * plan/free-run starts it on the phone via WearCmd, falling back to a
+ * standalone recording if no phone is connected.
  */
-class PlansActivity : Activity() {
-    private val main = Handler(Looper.getMainLooper())
+class PlansActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_plans)
-        val list = findViewById<LinearLayout>(R.id.list)
-
-        list.addView(rowButton(getString(R.string.quick_goal)) {
-            startActivity(Intent(this, QuickGoalActivity::class.java))
-        })
-        list.addView(rowButton(getString(R.string.free_run)) { startFreeRun() })
-
-        Thread {
-            val plans = PlanStore.listPlans(this)
-            main.post {
-                for (plan in plans) list.addView(rowButton(planLabel(plan)) { startPlan(plan) })
+        setContent {
+            AeraTheme {
+                PlansScreen(
+                    onFreeRun = { startFreeRun() },
+                    onPlan = { startPlan(it) },
+                    onQuickGoal = { startActivity(Intent(this, QuickGoalActivity::class.java)) },
+                )
             }
-        }.start()
-    }
-
-    private fun planLabel(plan: JSONObject): String {
-        val name = plan.optString("name", "Plan")
-        val steps = plan.optJSONArray("steps")
-        val n = steps?.length() ?: 0
-        return if (n > 0) "$name ($n steps)" else name
-    }
-
-    private fun rowButton(label: String, onClick: () -> Unit): Button {
-        val btn = Button(this)
-        btn.text = label
-        btn.setBackgroundResource(R.drawable.btn_rounded)
-        btn.setTextColor(0xFFFFFFFF.toInt())
-        val params = LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT,
-            LinearLayout.LayoutParams.WRAP_CONTENT,
-        )
-        params.topMargin = 8
-        btn.layoutParams = params
-        btn.setOnClickListener { onClick() }
-        return btn
+        }
     }
 
     private fun startPlan(plan: JSONObject) {
         Thread {
             val planJson = plan.toString()
             val sent = WearCmd.send(this, "start:$planJson")
-            main.post {
+            runOnUiThread {
                 if (sent) {
                     ContextCompat.startForegroundService(this, Intent(this, HrService::class.java))
                     finish()
@@ -75,7 +80,7 @@ class PlansActivity : Activity() {
     private fun startFreeRun() {
         Thread {
             val sent = WearCmd.send(this, "start")
-            main.post {
+            runOnUiThread {
                 if (sent) {
                     ContextCompat.startForegroundService(this, Intent(this, HrService::class.java))
                     finish()
@@ -94,4 +99,64 @@ class PlansActivity : Activity() {
         startActivity(intent)
         finish()
     }
+}
+
+private fun planLabel(plan: JSONObject): Pair<String, String?> {
+    val name = plan.optString("name", "Plan")
+    val steps = plan.optJSONArray("steps")
+    val n = steps?.length() ?: 0
+    return name to (if (n > 0) "synced from phone · $n steps" else "synced from phone")
+}
+
+@Composable
+private fun PlansScreen(onFreeRun: () -> Unit, onPlan: (JSONObject) -> Unit, onQuickGoal: () -> Unit) {
+    val context = LocalContext.current
+    var plans by remember { mutableStateOf<List<JSONObject>>(emptyList()) }
+    LaunchedEffect(Unit) {
+        plans = withContext(Dispatchers.IO) { PlanStore.listPlans(context) }
+    }
+
+    val listState = rememberScalingLazyListState()
+    val focusRequester = remember { FocusRequester() }
+    LaunchedEffect(Unit) { focusRequester.requestFocus() }
+    Scaffold(
+        timeText = { TimeText() },
+        positionIndicator = { PositionIndicator(scalingLazyListState = listState) },
+    ) {
+        Box(Modifier.fillMaxSize().background(Nocturne.ground)) {
+            ScalingLazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .rotaryScrollable(
+                        RotaryScrollableDefaults.behavior(scrollableState = listState),
+                        focusRequester = focusRequester,
+                    )
+                    .focusRequester(focusRequester)
+                    .focusable(),
+                state = listState,
+                autoCentering = androidx.wear.compose.foundation.lazy.AutoCenteringParams(itemIndex = 0),
+            ) {
+                item { PlanChip(title = "Free run", subtitle = null, onClick = onFreeRun) }
+                items(plans) { plan ->
+                    val (title, subtitle) = planLabel(plan)
+                    PlanChip(title = title, subtitle = subtitle, onClick = { onPlan(plan) })
+                }
+                item { PlanChip(title = "Quick goal", subtitle = null, onClick = onQuickGoal) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PlanChip(title: String, subtitle: String?, onClick: () -> Unit) {
+    Chip(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+        colors = ChipDefaults.chipColors(
+            backgroundColor = Nocturne.accent900,
+            contentColor = Nocturne.text,
+        ),
+        label = { Text(title, fontWeight = FontWeight.Medium, fontSize = 15.sp) },
+        secondaryLabel = subtitle?.let { { Text(it, color = Nocturne.accent300, fontSize = 11.sp) } },
+    )
 }
