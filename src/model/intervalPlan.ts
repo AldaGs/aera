@@ -61,7 +61,8 @@ export function planUpdatedAt(p: IntervalPlan): string {
  */
 export function migratePlan(p: IntervalPlan): IntervalPlan {
   const { warmup, work, recovery, repeats, cooldown, ...rest } = p;
-  if (p.steps && p.steps.length) return { ...rest, steps: p.steps };
+  // New shape: has steps (possibly empty, e.g. a fresh draft) and no legacy work field.
+  if (Array.isArray(p.steps) && (p.steps.length || !work)) return { ...rest, steps: p.steps };
 
   const steps: (PlanStepDef | RepeatBlock)[] = [];
   if (warmup) steps.push({ id: crypto.randomUUID(), kind: 'warmup', target: warmup });
@@ -169,7 +170,7 @@ const DEFAULT_RUN_PACE_SEC_PER_KM = 360; // 6:00/km
 const DEFAULT_WALK_PACE_SEC_PER_KM = 600; // 10:00/km
 
 /** run/work/warmup/cooldown use run pace; walk/recovery use walk pace. */
-function paceFor(kind: StepKind, pace?: { run?: number; walk?: number }): number {
+export function paceFor(kind: StepKind, pace?: { run?: number; walk?: number }): number {
   const run = pace?.run ?? DEFAULT_RUN_PACE_SEC_PER_KM;
   const walk = pace?.walk ?? DEFAULT_WALK_PACE_SEC_PER_KM;
   // Easy steps (warm-up, walk, recovery, cooldown) at walk pace; run/work at run pace.
@@ -222,7 +223,7 @@ export function planEstimate(p: IntervalPlan, pace?: { run?: number; walk?: numb
 export function fmtPlanMeta(est: PlanEstimate): string {
   const tilde = est.approx ? '~' : '';
   const min = Math.round(est.sec / 60);
-  const parts = [`${est.steps} steps`, `${tilde}${min} min`];
+  const parts = [`${est.steps} ${est.steps === 1 ? 'step' : 'steps'}`, `${tilde}${min} min`];
   if (est.m > 0) parts.push(`${tilde}${(est.m / 1000).toFixed(1)} km`);
   return parts.join(' · ');
 }

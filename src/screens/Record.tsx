@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { SneakerMove, Bicycle, DeviceMobile, Watch, Play, Plus, PersonSimpleWalk, ArrowCounterClockwise, Repeat, Trash } from '@phosphor-icons/react';
+import { SneakerMove, Bicycle, DeviceMobile, Watch, Play, Plus, PersonSimpleWalk, ArrowCounterClockwise, Repeat, Trash, PencilSimple } from '@phosphor-icons/react';
 import type { Sport } from '@/model/workout';
 import { saveWorkout, listPlans, getPlan, deletePlan } from '@/db/db';
 import type { IntervalPlan, StepTarget } from '@/model/intervalPlan';
@@ -33,6 +33,7 @@ export function Record({ onRecorded }: { onRecorded: () => void }) {
   const [canResume, setCanResume] = useState(hasResumableRecording());
   const [plans, setPlans] = useState<IntervalPlan[]>([]);
   const [builderOpen, setBuilderOpen] = useState(false);
+  const [editingPlan, setEditingPlan] = useState<IntervalPlan | null>(null);
   const [goalType, setGoalType] = useState<'none' | 'time' | 'distance' | 'either'>('none');
   const [goalSec, setGoalSec] = useState(1800);
   const [goalKm, setGoalKm] = useState(5);
@@ -327,6 +328,9 @@ export function Record({ onRecorded }: { onRecorded: () => void }) {
                   </div>
                   <Play size={20} weight="fill" className="icon-grad" />
                 </button>
+                <button className="plan-del" onClick={() => setEditingPlan(p)} aria-label="Edit interval">
+                  <PencilSimple size={16} />
+                </button>
                 <button className="plan-del" onClick={() => removePlan(p.id)} aria-label="Delete interval">
                   <Trash size={16} />
                 </button>
@@ -370,11 +374,16 @@ export function Record({ onRecorded }: { onRecorded: () => void }) {
         <Plus size={18} /> Add sample {sport} (dev)
       </button>
 
-      {builderOpen && (
+      {(builderOpen || editingPlan) && (
         <IntervalBuilder
-          onClose={() => setBuilderOpen(false)}
+          plan={editingPlan ?? undefined}
+          onClose={() => {
+            setBuilderOpen(false);
+            setEditingPlan(null);
+          }}
           onSaved={() => {
             setBuilderOpen(false);
+            setEditingPlan(null);
             reloadPlans();
           }}
         />
