@@ -30,6 +30,16 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".PlansActivity"
+            android:exported="false"
+            android:label="@string/plans" />
+
+        <activity
+            android:name=".QuickGoalActivity"
+            android:exported="false"
+            android:label="@string/quick_goal" />
+
         <!-- Foreground service that samples HR and streams it to the phone. -->
         <service
             android:name=".HrService"

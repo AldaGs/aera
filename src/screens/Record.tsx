@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Footprints, Bike, Smartphone, Watch, Play, Plus, PersonStanding, RotateCcw, Repeat, Trash2 } from 'lucide-react';
 import type { Sport } from '@/model/workout';
-import { saveWorkout, listPlans, deletePlan } from '@/db/db';
+import { db, saveWorkout, listPlans, deletePlan } from '@/db/db';
 import type { IntervalPlan, StepTarget } from '@/model/intervalPlan';
 import { flattenPlan, planSummary } from '@/model/intervalPlan';
 import { makeSampleWorkout } from '@/importers/sampleData';
@@ -59,6 +59,28 @@ export function Record({ onRecorded }: { onRecorded: () => void }) {
             }
             return current;
           });
+        } else if (e.cmd.startsWith('start:')) {
+          // Payload is the full plan JSON: the message can beat the DataItem sync,
+          // so merge it in directly instead of waiting for the plan to arrive.
+          const json = e.cmd.slice('start:'.length);
+          mergeIncomingPlan(json).then(async () => {
+            reloadPlans();
+            let planId = json;
+            try {
+              planId = JSON.parse(json).id;
+            } catch {
+              // bare id (older watch build)
+            }
+            const plan = await db.plans.get(planId);
+            const engine = plan
+              ? engineForPlan(plan)
+              : (() => {
+                  const e = new RecordingEngine('run');
+                  e.start();
+                  return e;
+                })();
+            setRecording((current) => current ?? engine);
+          });
         }
       }).then((h) => {
         if (active) handles.push(h);
@@ -112,10 +134,14 @@ export function Record({ onRecorded }: { onRecorded: () => void }) {
     startPlan(plan);
   }
 
-  function startPlan(plan: IntervalPlan) {
+  function engineForPlan(plan: IntervalPlan): RecordingEngine {
     const engine = new RecordingEngine(plan.sport);
     engine.setPlan(flattenPlan(plan), plan.autoFinish);
-    setRecording(engine);
+    return engine;
+  }
+
+  function startPlan(plan: IntervalPlan) {
+    setRecording(engineForPlan(plan));
   }
 
   async function removePlan(id: string) {

@@ -4,4 +4,10 @@
     <string name="bpm">BPM</string>
     <string name="start">Start</string>
     <string name="stop">Stop</string>
+    <string name="plans">Plans</string>
+    <string name="quick_goal">Quick goal</string>
+    <string name="phone_not_connected">Phone not connected</string>
+    <string name="goal_time">Time</string>
+    <string name="goal_distance">Distance</string>
+    <string name="goal_either">Either</string>
 </resources>

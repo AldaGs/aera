@@ -15,8 +15,6 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.content.Context
 import androidx.core.content.ContextCompat
-import com.google.android.gms.tasks.Tasks
-import com.google.android.gms.wearable.Wearable
 
 /**
  * The aera watch screen: a big live HR number, the current interval step +
@@ -65,6 +63,9 @@ class MainActivity : Activity() {
         countdownText = findViewById(R.id.countdown)
         toggle = findViewById(R.id.toggle)
         toggle.setOnClickListener { toggleMeasuring() }
+        findViewById<Button>(R.id.plans).setOnClickListener {
+            startActivity(Intent(this, PlansActivity::class.java))
+        }
         ensurePermissions()
     }
 
@@ -94,16 +95,7 @@ class MainActivity : Activity() {
     }
 
     private fun sendCmd(cmd: String) {
-        Thread {
-            try {
-                val nodes = Tasks.await(Wearable.getNodeClient(this).connectedNodes)
-                val mc = Wearable.getMessageClient(this)
-                val payload = cmd.toByteArray()
-                for (n in nodes) mc.sendMessage(n.id, "/aera/cmd", payload)
-            } catch (e: Exception) {
-                // Ignore
-            }
-        }.start()
+        Thread { WearCmd.send(this, cmd) }.start()
     }
 
     private fun hasBodySensors() =

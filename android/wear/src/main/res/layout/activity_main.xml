@@ -69,5 +69,15 @@
             android:textSize="16sp"
             android:textStyle="bold"
             android:text="@string/start" />
+
+        <Button
+            android:id="@+id/plans"
+            android:layout_width="match_parent"
+            android:layout_height="36dp"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/btn_rounded"
+            android:textColor="#FFFFFF"
+            android:textSize="13sp"
+            android:text="@string/plans" />
     </LinearLayout>
 </FrameLayout>
