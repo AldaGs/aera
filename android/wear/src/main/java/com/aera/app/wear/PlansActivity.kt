@@ -7,7 +7,6 @@ import android.os.Handler
 import android.os.Looper
 import android.widget.Button
 import android.widget.LinearLayout
-import android.widget.Toast
 import androidx.core.content.ContextCompat
 import org.json.JSONObject
 
@@ -26,6 +25,7 @@ class PlansActivity : Activity() {
         list.addView(rowButton(getString(R.string.quick_goal)) {
             startActivity(Intent(this, QuickGoalActivity::class.java))
         })
+        list.addView(rowButton(getString(R.string.free_run)) { startFreeRun() })
 
         Thread {
             val plans = PlanStore.listPlans(this)
@@ -58,15 +58,39 @@ class PlansActivity : Activity() {
 
     private fun startPlan(plan: JSONObject) {
         Thread {
-            val sent = WearCmd.send(this, "start:" + plan.toString())
+            val planJson = plan.toString()
+            val sent = WearCmd.send(this, "start:$planJson")
             main.post {
-                if (!sent) {
-                    Toast.makeText(this, R.string.phone_not_connected, Toast.LENGTH_SHORT).show()
-                } else {
+                if (sent) {
                     ContextCompat.startForegroundService(this, Intent(this, HrService::class.java))
                     finish()
+                } else {
+                    startStandalone(planJson)
                 }
             }
         }.start()
+    }
+
+    private fun startFreeRun() {
+        Thread {
+            val sent = WearCmd.send(this, "start")
+            main.post {
+                if (sent) {
+                    ContextCompat.startForegroundService(this, Intent(this, HrService::class.java))
+                    finish()
+                } else {
+                    startStandalone(null)
+                }
+            }
+        }.start()
+    }
+
+    /** No phone connected: record directly on the watch via ExerciseService (Phase 4). */
+    private fun startStandalone(planJson: String?) {
+        val intent = Intent(this, RecordActivity::class.java)
+        intent.putExtra(RecordActivity.EXTRA_SPORT, RecordActivity.sportOf(planJson))
+        if (planJson != null) intent.putExtra(RecordActivity.EXTRA_PLAN_JSON, planJson)
+        startActivity(intent)
+        finish()
     }
 }

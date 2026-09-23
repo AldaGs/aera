@@ -8,7 +8,6 @@ import android.os.Looper
 import android.view.View
 import android.widget.Button
 import android.widget.TextView
-import android.widget.Toast
 import androidx.core.content.ContextCompat
 import org.json.JSONObject
 import java.text.SimpleDateFormat
@@ -120,13 +119,18 @@ class QuickGoalActivity : Activity() {
             .put("updatedAt", now)
 
         Thread {
-            PlanStore.putPlan(this, plan.toString())
-            val sent = WearCmd.send(this, "start:" + plan.toString())
+            val planJson = plan.toString()
+            PlanStore.putPlan(this, planJson)
+            val sent = WearCmd.send(this, "start:$planJson")
             Handler(Looper.getMainLooper()).post {
-                if (!sent) {
-                    Toast.makeText(this, R.string.phone_not_connected, Toast.LENGTH_SHORT).show()
-                } else {
+                if (sent) {
                     ContextCompat.startForegroundService(this, Intent(this, HrService::class.java))
+                    finish()
+                } else {
+                    val intent = Intent(this, RecordActivity::class.java)
+                    intent.putExtra(RecordActivity.EXTRA_SPORT, RecordActivity.sportOf(planJson))
+                    intent.putExtra(RecordActivity.EXTRA_PLAN_JSON, planJson)
+                    startActivity(intent)
                     finish()
                 }
             }

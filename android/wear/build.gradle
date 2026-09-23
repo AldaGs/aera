@@ -44,4 +44,5 @@ dependencies {
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1'
     // Ongoing Activity for persistence.
     implementation 'androidx.wear:wear-ongoing:1.0.0'
+    testImplementation 'junit:junit:4.13.2'
 }
