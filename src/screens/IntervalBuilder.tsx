@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   X,
   Plus,
@@ -7,6 +7,8 @@ import {
   DotsSixVertical,
   Watch,
   Backspace,
+  Trash,
+  Check,
 } from '@phosphor-icons/react';
 import { savePlan } from '@/db/db';
 import type { IntervalPlan, PlanStepDef, RepeatBlock, StepKind, StepTarget } from '@/model/intervalPlan';
@@ -22,6 +24,18 @@ import {
   distanceBufferToMeters,
   metersToBuffer,
 } from '@/ui/keypad';
+import type { StepPath } from '@/model/builderOps';
+import {
+  pathEq,
+  stepAt,
+  replaceStep,
+  removeStep,
+  moveStep,
+  isContiguous,
+  wrapRange,
+  unwrapBlock,
+  setBlockRepeat,
+} from '@/model/builderOps';
 
 const SPORTS: Sport[] = ['run', 'walk', 'ride'];
 const SPORT_LABEL: Record<Sport, string> = { run: 'Run', walk: 'Walk', ride: 'Ride' };
@@ -37,43 +51,6 @@ const CHIP_LABEL: Record<StepKind, string> = {
 };
 
 type TargetType = 'time' | 'distance' | 'either' | 'manual';
-
-/** Path to an authored step: top-level index, or [blockIndex, innerIndex] inside a repeat block. */
-type StepPath = number | [number, number];
-
-function stepAt(steps: (PlanStepDef | RepeatBlock)[], path: StepPath): PlanStepDef {
-  if (typeof path === 'number') return steps[path] as PlanStepDef;
-  return (steps[path[0]] as RepeatBlock).steps[path[1]];
-}
-
-function replaceStep(
-  steps: (PlanStepDef | RepeatBlock)[],
-  path: StepPath,
-  next: PlanStepDef,
-): (PlanStepDef | RepeatBlock)[] {
-  const copy = steps.slice();
-  if (typeof path === 'number') {
-    copy[path] = next;
-  } else {
-    const [bi, si] = path;
-    const block = copy[bi] as RepeatBlock;
-    const innerSteps = block.steps.slice();
-    innerSteps[si] = next;
-    copy[bi] = { ...block, steps: innerSteps };
-  }
-  return copy;
-}
-
-function removeStep(steps: (PlanStepDef | RepeatBlock)[], path: StepPath): (PlanStepDef | RepeatBlock)[] {
-  if (typeof path === 'number') return steps.filter((_, i) => i !== path);
-  const [bi, si] = path;
-  const copy = steps.slice();
-  const block = copy[bi] as RepeatBlock;
-  const innerSteps = block.steps.filter((_, i) => i !== si);
-  if (innerSteps.length === 0) copy.splice(bi, 1);
-  else copy[bi] = { ...block, steps: innerSteps };
-  return copy;
-}
 
 /** Flat, numbered list of authored steps (repeat-block members counted once, not ×repeat) for
  * the sheet's "Step N" header and "after <prev>" lookup. */
@@ -112,6 +89,8 @@ export function IntervalBuilder({
   const [draft, setDraft] = useState<IntervalPlan>(() => plan ?? newPlan('run'));
   const [editingPath, setEditingPath] = useState<StepPath | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [selectMode, setSelectMode] = useState(false);
+  const [selected, setSelected] = useState<number[]>([]); // top-level indices only
   const isEditingExisting = !!plan;
 
   const est = planEstimate(draft);
@@ -151,6 +130,47 @@ export function IntervalBuilder({
     if (editingPath === null) return;
     setDraft((d) => ({ ...d, steps: removeStep(d.steps, editingPath) }));
     closeSheet();
+  }
+
+  function deleteStepAt(path: StepPath) {
+    setDraft((d) => ({ ...d, steps: removeStep(d.steps, path) }));
+  }
+
+  function reorderTop(from: number, to: number) {
+    setDraft((d) => ({ ...d, steps: moveStep(d.steps, null, from, to) }));
+  }
+
+  function reorderInBlock(blockIndex: number, from: number, to: number) {
+    setDraft((d) => ({ ...d, steps: moveStep(d.steps, blockIndex, from, to) }));
+  }
+
+  function toggleSelectMode() {
+    setSelectMode((on) => !on);
+    setSelected([]);
+  }
+
+  function toggleSelected(path: StepPath) {
+    if (typeof path !== 'number') return; // only top-level steps are selectable
+    setSelected((sel) => (sel.includes(path) ? sel.filter((i) => i !== path) : [...sel, path]));
+  }
+
+  const canConfirmWrap = isContiguous(selected);
+
+  function confirmWrap() {
+    if (!canConfirmWrap) return;
+    const from = Math.min(...selected);
+    const to = Math.max(...selected);
+    setDraft((d) => ({ ...d, steps: wrapRange(d.steps, from, to) }));
+    setSelectMode(false);
+    setSelected([]);
+  }
+
+  function unwrap(blockIndex: number) {
+    setDraft((d) => ({ ...d, steps: unwrapBlock(d.steps, blockIndex) }));
+  }
+
+  function setRepeat(blockIndex: number, repeat: number) {
+    setDraft((d) => ({ ...d, steps: setBlockRepeat(d.steps, blockIndex, repeat) }));
   }
 
   async function submit() {
@@ -207,36 +227,52 @@ export function IntervalBuilder({
           </div>
         )}
 
-        <ul className="builder-steps">
-          {draft.steps.length === 0 && (
-            <li className="muted small builder-empty">
-              No steps yet — tap "+ Add step" to build your workout.
-            </li>
-          )}
-          {draft.steps.map((item, i) =>
-            'repeat' in item ? (
-              <li key={item.id} className="builder-repeat-block">
-                <div className="builder-repeat-head">{item.repeat}×</div>
-                <ul className="builder-steps">
-                  {item.steps.map((s, j) => (
-                    <StepRow key={s.id} step={s} onClick={() => openEditSheet([i, j])} />
-                  ))}
-                </ul>
-              </li>
-            ) : (
-              <StepRow key={item.id} step={item} onClick={() => openEditSheet(i)} />
-            ),
-          )}
-        </ul>
+        {draft.steps.length === 0 && (
+          <p className="muted small builder-empty">No steps yet — tap "+ Add step" to build your workout.</p>
+        )}
+        {draft.steps.length > 0 && (
+          <TopLevelList
+            items={draft.steps}
+            selectMode={selectMode}
+            selectedPaths={selected}
+            onToggleSelect={toggleSelected}
+            onEdit={openEditSheet}
+            onDelete={deleteStepAt}
+            onReorderTop={reorderTop}
+            onReorderInBlock={reorderInBlock}
+            onUnwrap={unwrap}
+            onSetRepeat={setRepeat}
+          />
+        )}
 
         <div className="builder-actions">
-          <button className="btn" onClick={openAddSheet}>
-            <Plus size={16} /> Add step
-          </button>
-          <button className="btn-ghost" disabled title="Coming soon">
-            Repeat block
-          </button>
+          {selectMode ? (
+            <>
+              <button className="btn" onClick={confirmWrap} disabled={!canConfirmWrap}>
+                <Check size={16} /> Wrap {selected.length || ''} in repeat
+              </button>
+              <button className="btn-ghost" onClick={toggleSelectMode}>
+                Cancel
+              </button>
+            </>
+          ) : (
+            <>
+              <button className="btn" onClick={openAddSheet}>
+                <Plus size={16} /> Add step
+              </button>
+              <button
+                className="btn-ghost"
+                onClick={toggleSelectMode}
+                disabled={draft.steps.filter((it) => !('repeat' in it)).length < 2}
+              >
+                Repeat block
+              </button>
+            </>
+          )}
         </div>
+        {selectMode && !canConfirmWrap && selected.length > 0 && (
+          <p className="muted small">Selection must be contiguous — pick steps next to each other.</p>
+        )}
 
         <label className="builder-autofinish">
           <span>Save and stop when the last step ends</span>
@@ -268,35 +304,402 @@ export function IntervalBuilder({
   );
 }
 
-function pathEq(a: StepPath, b: StepPath): boolean {
-  if (typeof a === 'number' || typeof b === 'number') return a === b;
-  return a[0] === b[0] && a[1] === b[1];
+// ---------------------------------------------------------------------------
+// Drag reorder + swipe delete for one flat list of rows (top level, or a
+// single repeat block's inner steps — moving a step between lists is not
+// supported, only within one).
+// ---------------------------------------------------------------------------
+
+const SWIPE_DELETE_PX = 80; // ponytail: fixed threshold, no velocity/fling detection
+const LONG_PRESS_MS = 400;
+
+/** Drag-to-reorder for a flat list: reorders live as the dragged row crosses another
+ * row's midpoint, so other rows shift to show the drop slot as you drag. */
+function useDragReorder(itemIds: string[], onReorder: (from: number, to: number) => void) {
+  const rowRefs = useRef(new Map<string, HTMLElement>());
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [dragY, setDragY] = useState(0);
+  // grabOffset = pointer Y minus the row's natural (untransformed) top at grab time.
+  const start = useRef<{ grabOffset: number } | null>(null);
+  const dragYRef = useRef(0);
+
+  function setRowRef(id: string, el: HTMLElement | null) {
+    if (el) rowRefs.current.set(id, el);
+    else rowRefs.current.delete(id);
+  }
+
+  function setY(y: number) {
+    dragYRef.current = y;
+    setDragY(y);
+  }
+
+  function begin(id: string, clientY: number) {
+    const el = rowRefs.current.get(id);
+    start.current = { grabOffset: clientY - (el ? el.getBoundingClientRect().top : clientY) };
+    setDraggingId(id);
+    setY(0);
+  }
+
+  function move(clientY: number) {
+    if (!draggingId || !start.current) return;
+    const el = rowRefs.current.get(draggingId);
+    if (!el) return;
+    // Keep the row under the finger even after it has moved to a new slot.
+    const naturalTop = el.getBoundingClientRect().top - dragYRef.current;
+    setY(clientY - start.current.grabOffset - naturalTop);
+    // Target slot = how many *other* rows have their midpoint above the pointer.
+    // (The dragged row follows the pointer, so it must not take part.)
+    const fromIndex = itemIds.indexOf(draggingId);
+    let toIndex = 0;
+    itemIds.forEach((id) => {
+      if (id === draggingId) return;
+      const r = rowRefs.current.get(id)?.getBoundingClientRect();
+      if (r && r.top + r.height / 2 < clientY) toIndex++;
+    });
+    if (toIndex !== fromIndex) onReorder(fromIndex, toIndex);
+  }
+
+  function end() {
+    setDraggingId(null);
+    start.current = null;
+    setY(0);
+  }
+
+  return { draggingId, dragY, setRowRef, begin, move, end };
 }
 
-function StepRow({ step, onClick }: { step: PlanStepDef; onClick: () => void }) {
+function StepRow({
+  step,
+  selectable,
+  selected,
+  onToggleSelect,
+  onClick,
+  onDelete,
+  dragActive,
+  dragY,
+  rowRef,
+  onHandlePointerDown,
+  onBodyPointerDown,
+}: {
+  step: PlanStepDef;
+  selectable: boolean; // selection-mode: show a checkbox instead of the drag handle
+  selected: boolean;
+  onToggleSelect: () => void;
+  onClick: () => void;
+  onDelete: () => void;
+  dragActive: boolean;
+  dragY: number;
+  rowRef: (el: HTMLElement | null) => void;
+  onHandlePointerDown: (e: React.PointerEvent) => void;
+  onBodyPointerDown: (e: React.PointerEvent) => void;
+}) {
   const isDistanceRun = (step.kind === 'run' || step.kind === 'work') && step.target.type === 'distance';
   const TypeIcon = step.target.type === 'distance' ? Ruler : Timer;
+  const [swipeX, setSwipeX] = useState(0);
+  const [revealed, setRevealed] = useState(false);
+  const swipe = useRef<{ x: number; y: number; axis: 'h' | 'v' | null } | null>(null);
+
+  function onPointerDown(e: React.PointerEvent) {
+    if (selectable) return; // no swipe/drag while picking steps for a repeat block
+    swipe.current = { x: e.clientX, y: e.clientY, axis: null };
+    onBodyPointerDown(e);
+  }
+  function onPointerMove(e: React.PointerEvent) {
+    if (!swipe.current || dragActive) return;
+    const dx = e.clientX - swipe.current.x;
+    const dy = e.clientY - swipe.current.y;
+    if (swipe.current.axis === null && Math.max(Math.abs(dx), Math.abs(dy)) > 8) {
+      swipe.current.axis = Math.abs(dx) > Math.abs(dy) ? 'h' : 'v';
+      if (swipe.current.axis === 'h') (e.target as Element).setPointerCapture?.(e.pointerId);
+    }
+    if (swipe.current.axis === 'h') {
+      e.preventDefault();
+      setSwipeX(Math.max(-96, Math.min(0, (revealed ? -72 : 0) + dx)));
+    }
+  }
+  function onPointerUp() {
+    const s = swipe.current;
+    swipe.current = null;
+    if (dragActive) return;
+    if (!s || s.axis === null) {
+      if (!revealed) onClick(); // plain tap: open the edit sheet
+      else setRevealed(false), setSwipeX(0);
+      return;
+    }
+    if (s.axis === 'h') {
+      if (swipeX <= -SWIPE_DELETE_PX) {
+        onDelete();
+        return;
+      }
+      const reveal = swipeX < -36;
+      setRevealed(reveal);
+      setSwipeX(reveal ? -72 : 0);
+    }
+  }
+
   return (
-    <li className={`builder-step-row ${isDistanceRun ? 'builder-step-row-dist' : ''}`}>
-      <button className="builder-step-main" onClick={onClick}>
-        <span className={`builder-step-stripe builder-step-stripe-${step.kind === 'work' ? 'run' : step.kind}`} />
-        <div className="builder-step-info">
-          <span className="builder-step-kind">{CHIP_LABEL[step.kind]}</span>
-          <span className="builder-step-type muted small">
-            {step.target.type !== 'manual' && <TypeIcon size={12} />}
-            {step.target.type === 'time'
-              ? 'Time'
-              : step.target.type === 'distance'
-                ? 'Distance'
-                : step.target.type === 'either'
-                  ? 'Either'
-                  : 'Tap'}
-          </span>
-        </div>
-        <span className="builder-step-value">{fmtTarget(step.target)}</span>
-      </button>
-      <DotsSixVertical size={18} className="builder-step-handle" />
+    <li
+      className={`builder-step-row ${isDistanceRun ? 'builder-step-row-dist' : ''} ${dragActive ? 'builder-step-row-dragging' : ''}`}
+      ref={rowRef as React.Ref<HTMLLIElement>}
+      style={dragActive ? { transform: `translateY(${dragY}px)`, zIndex: 2 } : undefined}
+    >
+      <div className="builder-step-swipe-delete" style={{ opacity: swipeX < -8 ? 1 : 0 }}>
+        <button className="builder-step-trash" onClick={onDelete} aria-label="Delete step">
+          <Trash size={16} />
+        </button>
+      </div>
+      <div
+        className="builder-step-swipe-content"
+        style={{ transform: `translateX(${swipeX}px)` }}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerUp}
+      >
+        {selectable && (
+          <button
+            className={`builder-step-radio ${selected ? 'builder-step-radio-selected' : ''}`}
+            onClick={onToggleSelect}
+            aria-label={selected ? 'Deselect step' : 'Select step'}
+          />
+        )}
+        <button className="builder-step-main" onClick={selectable ? onToggleSelect : undefined}>
+          <span className={`builder-step-stripe builder-step-stripe-${step.kind === 'work' ? 'run' : step.kind}`} />
+          <div className="builder-step-info">
+            <span className="builder-step-kind">{CHIP_LABEL[step.kind]}</span>
+            <span className="builder-step-type muted small">
+              {step.target.type !== 'manual' && <TypeIcon size={12} />}
+              {step.target.type === 'time'
+                ? 'Time'
+                : step.target.type === 'distance'
+                  ? 'Distance'
+                  : step.target.type === 'either'
+                    ? 'Either'
+                    : 'Tap'}
+            </span>
+          </div>
+          <span className="builder-step-value">{fmtTarget(step.target)}</span>
+        </button>
+        {!selectable && (
+          <DotsSixVertical
+            size={18}
+            className="builder-step-handle"
+            onPointerDown={onHandlePointerDown}
+          />
+        )}
+      </div>
     </li>
+  );
+}
+
+/** A flat, draggable/swipeable list of plain steps — used for a repeat block's inner steps. */
+function StepList({
+  items,
+  selectMode,
+  selectedPaths,
+  onToggleSelect,
+  onEdit,
+  onDelete,
+  onReorder,
+  pathFor,
+}: {
+  items: PlanStepDef[];
+  selectMode: boolean;
+  selectedPaths: StepPath[];
+  onToggleSelect: (path: StepPath) => void;
+  onEdit: (path: StepPath) => void;
+  onDelete: (path: StepPath) => void;
+  onReorder: (from: number, to: number) => void;
+  pathFor: (index: number) => StepPath;
+}) {
+  const ids = items.map((it) => it.id);
+  const dnd = useDragReorder(ids, onReorder);
+  const longPress = useRef<number | null>(null);
+
+  function startDrag(id: string, e: React.PointerEvent) {
+    (e.target as Element).setPointerCapture?.(e.pointerId);
+    dnd.begin(id, e.clientY);
+  }
+  function cancelLongPress() {
+    if (longPress.current !== null) {
+      window.clearTimeout(longPress.current);
+      longPress.current = null;
+    }
+  }
+
+  return (
+    <ul
+      className="builder-steps"
+      onPointerMove={(e) => dnd.move(e.clientY)}
+      onPointerUp={() => {
+        cancelLongPress();
+        dnd.end();
+      }}
+      onPointerCancel={() => {
+        cancelLongPress();
+        dnd.end();
+      }}
+    >
+      {items.map((step, i) => {
+        const path = pathFor(i);
+        return (
+          <StepRow
+            key={step.id}
+            step={step}
+            selectable={selectMode}
+            selected={selectedPaths.some((p) => pathEq(p, path))}
+            onToggleSelect={() => onToggleSelect(path)}
+            onClick={() => onEdit(path)}
+            onDelete={() => onDelete(path)}
+            dragActive={dnd.draggingId === step.id}
+            dragY={dnd.dragY}
+            rowRef={(el) => dnd.setRowRef(step.id, el)}
+            onHandlePointerDown={(e) => startDrag(step.id, e)}
+            onBodyPointerDown={(e) => {
+              // Touch only: long-press the row body to start a drag (mouse/pen use the handle).
+              if (e.pointerType !== 'touch') return;
+              const { clientX, clientY, pointerId } = e;
+              longPress.current = window.setTimeout(() => {
+                longPress.current = null;
+                dnd.begin(step.id, clientY);
+                (e.target as Element).setPointerCapture?.(pointerId);
+              }, LONG_PRESS_MS);
+              const cancel = () => cancelLongPress();
+              window.addEventListener('pointermove', (ev) => {
+                if (Math.hypot(ev.clientX - clientX, ev.clientY - clientY) > 8) cancel();
+              }, { once: true });
+              window.addEventListener('pointerup', cancel, { once: true });
+            }}
+          />
+        );
+      })}
+    </ul>
+  );
+}
+
+/** Top-level list: renders plain steps and repeat-block containers in authored order.
+ * Drag reorder covers the whole top-level array (a block moves as one row); reordering
+ * steps inside a block is handled by that block's own nested StepList. */
+function TopLevelList({
+  items,
+  selectMode,
+  selectedPaths,
+  onToggleSelect,
+  onEdit,
+  onDelete,
+  onReorderTop,
+  onReorderInBlock,
+  onUnwrap,
+  onSetRepeat,
+}: {
+  items: (PlanStepDef | RepeatBlock)[];
+  selectMode: boolean;
+  selectedPaths: StepPath[];
+  onToggleSelect: (path: StepPath) => void;
+  onEdit: (path: StepPath) => void;
+  onDelete: (path: StepPath) => void;
+  onReorderTop: (from: number, to: number) => void;
+  onReorderInBlock: (blockIndex: number, from: number, to: number) => void;
+  onUnwrap: (blockIndex: number) => void;
+  onSetRepeat: (blockIndex: number, repeat: number) => void;
+}) {
+  const ids = items.map((it) => it.id);
+  const dnd = useDragReorder(ids, onReorderTop);
+  const longPress = useRef<number | null>(null);
+
+  function startDrag(id: string, e: React.PointerEvent) {
+    (e.target as Element).setPointerCapture?.(e.pointerId);
+    dnd.begin(id, e.clientY);
+  }
+  function cancelLongPress() {
+    if (longPress.current !== null) {
+      window.clearTimeout(longPress.current);
+      longPress.current = null;
+    }
+  }
+
+  return (
+    <ul
+      className="builder-steps"
+      onPointerMove={(e) => dnd.move(e.clientY)}
+      onPointerUp={() => {
+        cancelLongPress();
+        dnd.end();
+      }}
+      onPointerCancel={() => {
+        cancelLongPress();
+        dnd.end();
+      }}
+    >
+      {items.map((item, i) => {
+        if ('repeat' in item) {
+          return (
+            <li
+              key={item.id}
+              className={`builder-repeat-block ${dnd.draggingId === item.id ? 'builder-step-row-dragging' : ''}`}
+              ref={(el) => dnd.setRowRef(item.id, el)}
+              style={dnd.draggingId === item.id ? { transform: `translateY(${dnd.dragY}px)`, zIndex: 2 } : undefined}
+            >
+              <div className="builder-repeat-head">
+                <DotsSixVertical size={16} className="builder-step-handle" onPointerDown={(e) => startDrag(item.id, e)} />
+                <span>{item.repeat}×</span>
+                <div className="builder-repeat-stepper">
+                  <button onClick={() => onSetRepeat(i, item.repeat - 1)} disabled={item.repeat <= 2} aria-label="Fewer repeats">
+                    −
+                  </button>
+                  <button onClick={() => onSetRepeat(i, item.repeat + 1)} disabled={item.repeat >= 50} aria-label="More repeats">
+                    +
+                  </button>
+                </div>
+                <button className="builder-repeat-unwrap" onClick={() => onUnwrap(i)}>
+                  Unwrap
+                </button>
+              </div>
+              <StepList
+                items={item.steps}
+                selectMode={false}
+                selectedPaths={[]}
+                onToggleSelect={() => {}}
+                onEdit={onEdit}
+                onDelete={onDelete}
+                onReorder={(from, to) => onReorderInBlock(i, from, to)}
+                pathFor={(j) => [i, j] as StepPath}
+              />
+            </li>
+          );
+        }
+        const path: StepPath = i;
+        return (
+          <StepRow
+            key={item.id}
+            step={item}
+            selectable={selectMode}
+            selected={selectedPaths.some((p) => pathEq(p, path))}
+            onToggleSelect={() => onToggleSelect(path)}
+            onClick={() => onEdit(path)}
+            onDelete={() => onDelete(path)}
+            dragActive={dnd.draggingId === item.id}
+            dragY={dnd.dragY}
+            rowRef={(el) => dnd.setRowRef(item.id, el)}
+            onHandlePointerDown={(e) => startDrag(item.id, e)}
+            onBodyPointerDown={(e) => {
+              if (e.pointerType !== 'touch') return;
+              const { clientX, clientY, pointerId } = e;
+              longPress.current = window.setTimeout(() => {
+                longPress.current = null;
+                dnd.begin(item.id, clientY);
+                (e.target as Element).setPointerCapture?.(pointerId);
+              }, LONG_PRESS_MS);
+              const cancel = () => cancelLongPress();
+              window.addEventListener('pointermove', (ev) => {
+                if (Math.hypot(ev.clientX - clientX, ev.clientY - clientY) > 8) cancel();
+              }, { once: true });
+              window.addEventListener('pointerup', cancel, { once: true });
+            }}
+          />
+        );
+      })}
+    </ul>
   );
 }
 
