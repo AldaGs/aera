@@ -191,7 +191,7 @@ export function WorkoutDetail({
               <ChartPanel icon={Heart} title="Heart rate">
                 <TrackChart
                   points={buildPoints(track.map((p) => p.hr))}
-                  color="#ff5a1f"
+                  color="var(--accent)"
                   activeX={scrubX}
                   onScrub={setScrubX}
                   format={(v) => `${Math.round(v)} bpm`}
@@ -204,7 +204,7 @@ export function WorkoutDetail({
               <ChartPanel icon={Activity} title="Cadence">
                 <TrackChart
                   points={buildPoints(track.map((p) => p.cad))}
-                  color="#35c98d"
+                  color="var(--color-accent-400)"
                   activeX={scrubX}
                   onScrub={setScrubX}
                   format={(v) => fmtCadence(v, w.sport)}
@@ -217,7 +217,7 @@ export function WorkoutDetail({
               <ChartPanel icon={Gauge} title="Speed">
                 <TrackChart
                   points={buildPoints(track.map((p) => (p.speed != null ? p.speed * 3.6 : null)))}
-                  color="#3ba0ff"
+                  color="var(--color-neutral-400)"
                   activeX={scrubX}
                   onScrub={setScrubX}
                   format={(v) => fmtSpeed(v)}
@@ -230,7 +230,7 @@ export function WorkoutDetail({
               <ChartPanel icon={Zap} title="Power">
                 <TrackChart
                   points={buildPoints(track.map((p) => p.power))}
-                  color="#f2c14e"
+                  color="var(--color-accent-300)"
                   activeX={scrubX}
                   onScrub={setScrubX}
                   format={(v) => fmtPower(v)}

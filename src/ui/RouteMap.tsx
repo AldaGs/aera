@@ -64,8 +64,8 @@ export function RouteMap({
       />
       {showEndpoints && (
         <>
-          <circle cx={sx} cy={sy} r={strokeWidth + 1.5} fill="#2f8fff" />
-          <circle cx={ex} cy={ey} r={strokeWidth + 1.5} fill="#ff5a1f" />
+          <circle cx={sx} cy={sy} r={strokeWidth + 1.5} fill="var(--accent-2)" />
+          <circle cx={ex} cy={ey} r={strokeWidth + 1.5} fill="var(--accent)" />
         </>
       )}
     </svg>
