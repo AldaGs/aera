@@ -1,70 +1,63 @@
 package com.aera.app.wear
 
 import android.Manifest
-import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.view.View
-import android.widget.Button
-import android.widget.TextView
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
+import com.aera.app.wear.ui.theme.AeraTheme
 import org.json.JSONObject
 
 /**
  * Standalone recording screen: elapsed/distance/HR + current plan step, mirroring
  * ExerciseService (via RecState) the same way MainActivity mirrors HrService/AeraState.
- * Requests the runtime permissions ExerciseService needs, then starts it.
+ * Requests the runtime permissions ExerciseService needs, then starts it, then shows
+ * the live layouts (1h/1i/1j) from LiveScreen, polling RecState every 500 ms.
  */
-class RecordActivity : Activity() {
+class RecordActivity : ComponentActivity() {
     private val handler = Handler(Looper.getMainLooper())
-
-    private lateinit var stepText: TextView
-    private lateinit var elapsedText: TextView
-    private lateinit var distanceText: TextView
-    private lateinit var hrText: TextView
-    private lateinit var countdownText: TextView
-    private lateinit var autoPausedText: TextView
-    private lateinit var pauseResumeBtn: Button
+    private var refreshTick by mutableStateOf(0)
+    // Only leave once a recording has actually run: before the service starts (or
+    // while the permission prompt is up) RecState.running is still false.
+    private var sawRunning = false
 
     private val refresh = object : Runnable {
         override fun run() {
-            val label = RecState.stepLabel
-            stepText.text = if (RecState.stepTotal > 0) "$label (${RecState.stepIndex + 1}/${RecState.stepTotal})" else label
-            elapsedText.text = fmtTime(RecState.elapsedSec)
-            distanceText.text = "%.2f km".format(RecState.distanceM / 1000.0)
-            hrText.text = if (RecState.hr > 0) "${RecState.hr} bpm" else "-- bpm"
-            countdownText.text = if (RecState.remainingSec > 0) fmtTime(RecState.remainingSec) else ""
-            autoPausedText.visibility = if (RecState.autoPaused) View.VISIBLE else View.GONE
-            pauseResumeBtn.text = if (RecState.paused) "Resume" else "Pause"
-            if (!RecState.running && !RecState.paused) {
+            if (RecState.running) sawRunning = true
+            if (sawRunning && !RecState.running && !RecState.paused) {
                 // ExerciseService stopped itself (ended/failed) — leave the screen.
                 finish()
                 return
             }
+            refreshTick++
             handler.postDelayed(this, 500)
         }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_record)
-        stepText = findViewById(R.id.recStep)
-        elapsedText = findViewById(R.id.recElapsed)
-        distanceText = findViewById(R.id.recDistance)
-        hrText = findViewById(R.id.recHr)
-        countdownText = findViewById(R.id.recCountdown)
-        autoPausedText = findViewById(R.id.recAutoPaused)
-        pauseResumeBtn = findViewById(R.id.recPauseResume)
-
-        pauseResumeBtn.setOnClickListener {
-            if (RecState.paused) ExerciseService.resume() else ExerciseService.pause()
+        setContent {
+            AeraTheme {
+                @Suppress("UNUSED_EXPRESSION") refreshTick // read to recompose on tick
+                LiveScreen(
+                    data = LiveData.from(RecState),
+                    paused = RecState.paused,
+                    onPause = { ExerciseService.pause() },
+                    onResume = { ExerciseService.resume() },
+                    onLap = { ExerciseService.lapOrNext() },
+                    onStop = { ExerciseService.stop() },
+                )
+            }
         }
-        findViewById<Button>(R.id.recLap).setOnClickListener { ExerciseService.lapOrNext() }
-        findViewById<Button>(R.id.recStop).setOnClickListener { ExerciseService.stop() }
 
         val sport = intent.getStringExtra(EXTRA_SPORT) ?: "run"
         val planJson = intent.getStringExtra(EXTRA_PLAN_JSON)
@@ -97,7 +90,7 @@ class RecordActivity : Activity() {
     private var pendingSport: String? = null
     private var pendingPlanJson: String? = null
 
-    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == 1) {
             val sport = pendingSport ?: "run"
@@ -111,12 +104,6 @@ class RecordActivity : Activity() {
         intent.putExtra(ExerciseService.EXTRA_SPORT, sport)
         if (planJson != null) intent.putExtra(ExerciseService.EXTRA_PLAN_JSON, planJson)
         ContextCompat.startForegroundService(this, intent)
-    }
-
-    private fun fmtTime(sec: Int): String {
-        val m = sec / 60
-        val s = sec % 60
-        return "%d:%02d".format(m, s)
     }
 
     companion object {

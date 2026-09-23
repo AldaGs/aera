@@ -5,8 +5,10 @@ import org.json.JSONObject
 /** Mirrors `StepTarget` in src/model/intervalPlan.ts. type: time|distance|either|manual. */
 data class StepTarget(val type: String, val sec: Int = 0, val m: Int = 0)
 
-/** Mirrors `PlanStep` in src/model/intervalPlan.ts. kind: warmup|work|recovery|cooldown. */
-data class PlanStep(val kind: String, val target: StepTarget, val label: String)
+/** Mirrors `PlanStep` in src/model/intervalPlan.ts. kind: warmup|work|recovery|cooldown.
+ * kindIndex/kindTotal are the 1-based rep count of this step's kind among the flattened
+ * list (e.g. 3rd "work" step of 5) — same numbers baked into [label]. */
+data class PlanStep(val kind: String, val target: StepTarget, val label: String, val kindIndex: Int = 1, val kindTotal: Int = 1)
 
 /**
  * Steps a flattened plan forward on ExerciseUpdate ticks, mirroring
@@ -59,6 +61,31 @@ class PlanRunner(private val steps: List<PlanStep>, val autoFinish: Boolean) {
         return ((t.sec * 1000L - (elapsedMs - stepStartMs)) / 1000).coerceAtLeast(0).toInt()
     }
 
+    /** Meters left in the current step, for distance/either targets; 0 otherwise. */
+    fun remainingM(distanceM: Double): Int {
+        val t = currentStep.target
+        if (t.type != "distance" && t.type != "either") return 0
+        return (t.m - (distanceM - stepStartDist)).coerceAtLeast(0.0).toInt()
+    }
+
+    /** 0f..1f progress through the current step (1j interval ring). Manual steps report 0f
+     * until tapped; "either" reports whichever of time/distance is further along. */
+    fun stepFraction(elapsedMs: Long, distanceM: Double): Float {
+        val t = currentStep.target
+        val timeFrac = if (t.sec > 0) ((elapsedMs - stepStartMs).toFloat() / (t.sec * 1000L)) else 0f
+        val distFrac = if (t.m > 0) ((distanceM - stepStartDist).toFloat() / t.m) else 0f
+        val frac = when (t.type) {
+            "time" -> timeFrac
+            "distance" -> distFrac
+            "either" -> maxOf(timeFrac, distFrac)
+            else -> 0f
+        }
+        return frac.coerceIn(0f, 1f)
+    }
+
+    /** Label of the step after this one, e.g. "Recovery" — null past the last step. */
+    fun nextStepLabel(): String? = steps.getOrNull(stepIndex + 1)?.label
+
     companion object {
         private val KIND_LABEL = mapOf(
             "warmup" to "Warm-up",
@@ -105,7 +132,7 @@ class PlanRunner(private val steps: List<PlanStep>, val autoFinish: Boolean) {
                 counters[s.kind] = i
                 val name = KIND_LABEL[s.kind] ?: s.kind
                 val lbl = if (s.kind == "work") "Work $i/$n" else if (n > 1) "$name $i/$n" else name
-                PlanStep(s.kind, s.target, lbl)
+                PlanStep(s.kind, s.target, lbl, kindIndex = i, kindTotal = n)
             }
         }
 

@@ -211,6 +211,8 @@ class ExerciseService : Service() {
         RecState.hr = lastHr
         RecState.autoPaused = state == ExerciseState.AUTO_PAUSED
         RecState.paused = state.isPaused
+        // speed m/s -> pace sec/km; 0/negative/absent speed (stopped or unsupported) reports no pace.
+        RecState.paceSecPerKm = if (speed != null && speed > 0.3) (1000.0 / speed).toInt() else 0
 
         runner?.let { r ->
             val changed = r.onUpdate(activeMs, distanceM)
@@ -218,6 +220,12 @@ class ExerciseService : Service() {
             RecState.stepKind = r.currentStep.kind
             RecState.stepIndex = r.stepIndex
             RecState.remainingSec = r.remainingSec(activeMs)
+            RecState.stepFraction = r.stepFraction(activeMs, distanceM)
+            RecState.stepRemainingM = r.remainingM(distanceM)
+            RecState.stepTargetM = r.currentStep.target.m
+            RecState.stepKindIndex = r.currentStep.kindIndex
+            RecState.stepKindTotal = r.currentStep.kindTotal
+            RecState.nextStepLabel = r.nextStepLabel() ?: ""
             RecState.complete = r.complete
             if (changed) onStepChanged(r, activeMs)
         }

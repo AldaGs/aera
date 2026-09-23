@@ -70,6 +70,50 @@ class PlanRunnerTest {
         assertTrue(r.complete)
     }
 
+    @Test
+    fun kindIndexAndTotalMatchLabelCounts() {
+        val steps = PlanRunner.flatten(null, StepTarget("time", sec = 30), StepTarget("time", sec = 15), 3, null)
+        // work,recovery,work,recovery,work,recovery
+        assertEquals(1 to 3, steps[0].kindIndex to steps[0].kindTotal)
+        assertEquals(2 to 3, steps[2].kindIndex to steps[2].kindTotal)
+        assertEquals(3 to 3, steps[4].kindIndex to steps[4].kindTotal)
+    }
+
+    @Test
+    fun stepFractionTracksTimeTarget() {
+        val steps = PlanRunner.flatten(null, StepTarget("time", sec = 100), null, 1, null)
+        val r = PlanRunner(steps, autoFinish = true)
+        assertEquals(0f, r.stepFraction(0, 0.0))
+        assertEquals(0.5f, r.stepFraction(50_000, 0.0))
+        assertEquals(1f, r.stepFraction(150_000, 0.0)) // coerced at 1
+    }
+
+    @Test
+    fun stepFractionTracksDistanceTarget() {
+        val steps = PlanRunner.flatten(null, StepTarget("distance", m = 1000), null, 1, null)
+        val r = PlanRunner(steps, autoFinish = true)
+        assertEquals(0.4f, r.stepFraction(0, 400.0))
+    }
+
+    @Test
+    fun remainingMCountsDownToZero() {
+        val steps = PlanRunner.flatten(null, StepTarget("distance", m = 800), null, 1, null)
+        val r = PlanRunner(steps, autoFinish = true)
+        assertEquals(600, r.remainingM(200.0))
+        assertEquals(0, r.remainingM(999.0))
+    }
+
+    @Test
+    fun nextStepLabelReflectsUpcomingStepAndIsNullAtEnd() {
+        val steps = PlanRunner.flatten(StepTarget("time", sec = 10), StepTarget("time", sec = 10), StepTarget("time", sec = 5), 1, null)
+        val r = PlanRunner(steps, autoFinish = true)
+        assertEquals("Work 1/1", r.nextStepLabel()) // from warmup, next is work ("work" always carries i/n)
+        r.next(1000, 0.0) // -> work
+        assertEquals("Recovery", r.nextStepLabel())
+        r.next(2000, 0.0) // -> recovery (last step)
+        assertEquals(null, r.nextStepLabel())
+    }
+
     private fun stepDef(kind: String, type: String, sec: Int = 0, m: Int = 0): JSONObject =
         JSONObject().put("kind", kind).put(
             "target",

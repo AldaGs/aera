@@ -17,6 +17,13 @@ object RecState {
     @Volatile var stepIndex: Int = 0
     @Volatile var stepTotal: Int = 0
     @Volatile var complete: Boolean = false
+    @Volatile var paceSecPerKm: Int = 0
+    @Volatile var stepFraction: Float = 0f
+    @Volatile var stepRemainingM: Int = 0
+    @Volatile var stepTargetM: Int = 0
+    @Volatile var stepKindIndex: Int = 1
+    @Volatile var stepKindTotal: Int = 1
+    @Volatile var nextStepLabel: String = ""
 
     fun reset() {
         running = false
@@ -31,5 +38,12 @@ object RecState {
         stepIndex = 0
         stepTotal = 0
         complete = false
+        paceSecPerKm = 0
+        stepFraction = 0f
+        stepRemainingM = 0
+        stepTargetM = 0
+        stepKindIndex = 1
+        stepKindTotal = 1
+        nextStepLabel = ""
     }
 }
