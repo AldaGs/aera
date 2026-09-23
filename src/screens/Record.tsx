@@ -3,7 +3,7 @@ import { SneakerMove, Bicycle, DeviceMobile, Watch, Play, Plus, PersonSimpleWalk
 import type { Sport } from '@/model/workout';
 import { saveWorkout, listPlans, getPlan, deletePlan } from '@/db/db';
 import type { IntervalPlan, StepTarget } from '@/model/intervalPlan';
-import { flattenPlan, planSummary } from '@/model/intervalPlan';
+import { flattenPlan, planSummary, planEstimate, fmtPlanMeta } from '@/model/intervalPlan';
 import { makeSampleWorkout } from '@/importers/sampleData';
 import { loadConnectivity, saveConnectivity } from '@/store/profile';
 import { LiveRecorder } from '@/screens/LiveRecorder';
@@ -323,6 +323,7 @@ export function Record({ onRecorded }: { onRecorded: () => void }) {
                   <div className="plan-info">
                     <span className="plan-name">{p.name}</span>
                     <span className="muted small">{planSummary(p)}</span>
+                    <span className="muted small">{fmtPlanMeta(planEstimate(p))}</span>
                   </div>
                   <Play size={20} weight="fill" className="icon-grad" />
                 </button>

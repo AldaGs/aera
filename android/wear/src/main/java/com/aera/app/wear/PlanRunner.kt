@@ -62,10 +62,15 @@ class PlanRunner(private val steps: List<PlanStep>, val autoFinish: Boolean) {
     companion object {
         private val KIND_LABEL = mapOf(
             "warmup" to "Warm-up",
+            "walk" to "Walk",
+            "run" to "Run",
             "work" to "Work",
             "recovery" to "Recovery",
             "cooldown" to "Cooldown",
         )
+
+        /** One authored step (or repeat block) before flattening/labeling. Mirrors PlanStepDef/RepeatBlock. */
+        private data class RawStep(val kind: String, val target: StepTarget)
 
         /** Expand an authored plan into the flat step list the runner walks. Mirrors flattenPlan(). */
         fun flatten(
@@ -75,25 +80,69 @@ class PlanRunner(private val steps: List<PlanStep>, val autoFinish: Boolean) {
             repeats: Int,
             cooldown: StepTarget?,
         ): List<PlanStep> {
-            val out = mutableListOf<PlanStep>()
-            if (warmup != null) out.add(PlanStep("warmup", warmup, KIND_LABEL.getValue("warmup")))
+            val raw = mutableListOf<RawStep>()
+            if (warmup != null) raw.add(RawStep("warmup", warmup))
             val n = maxOf(1, repeats)
-            for (i in 1..n) {
-                out.add(PlanStep("work", work, "Work $i/$n"))
-                if (recovery != null) out.add(PlanStep("recovery", recovery, "Recovery $i/$n"))
+            repeat(n) {
+                raw.add(RawStep("work", work))
+                if (recovery != null) raw.add(RawStep("recovery", recovery))
             }
-            if (cooldown != null) out.add(PlanStep("cooldown", cooldown, KIND_LABEL.getValue("cooldown")))
+            if (cooldown != null) raw.add(RawStep("cooldown", cooldown))
+            return label(raw)
+        }
+
+        /**
+         * Label a flat step list exactly like TS flattenPlan: 'work' always
+         * "Work i/n"; every other kind is suffixed " i/n" only when that
+         * kind's count > 1; otherwise just KIND_LABEL.
+         */
+        private fun label(raw: List<RawStep>): List<PlanStep> {
+            val totals = raw.groupingBy { it.kind }.eachCount()
+            val counters = mutableMapOf<String, Int>()
+            return raw.map { s ->
+                val n = totals.getValue(s.kind)
+                val i = (counters[s.kind] ?: 0) + 1
+                counters[s.kind] = i
+                val name = KIND_LABEL[s.kind] ?: s.kind
+                val lbl = if (s.kind == "work") "Work $i/$n" else if (n > 1) "$name $i/$n" else name
+                PlanStep(s.kind, s.target, lbl)
+            }
+        }
+
+        private fun target(json: JSONObject): StepTarget =
+            StepTarget(json.optString("type"), json.optInt("sec", 0), json.optInt("m", 0))
+
+        /** Expand `steps` (new shape: PlanStepDef | RepeatBlock, objects with "repeat"+"steps"). */
+        private fun expandSteps(arr: org.json.JSONArray): List<RawStep> {
+            val out = mutableListOf<RawStep>()
+            for (i in 0 until arr.length()) {
+                val o = arr.getJSONObject(i)
+                if (o.has("repeat")) {
+                    val n = maxOf(1, o.optInt("repeat", 1))
+                    val inner = o.optJSONArray("steps") ?: org.json.JSONArray()
+                    repeat(n) { out.addAll(expandSteps(inner)) }
+                } else {
+                    out.add(RawStep(o.optString("kind"), target(o.getJSONObject("target"))))
+                }
+            }
             return out
         }
 
-        /** Parse a synced IntervalPlan JSON (see PlanStore) into steps + autoFinish. */
+        /** Parse a synced IntervalPlan JSON (see PlanStore) into steps + autoFinish.
+         * New shape (`steps` array) is read directly; legacy shape (warmup/work/
+         * recovery/repeats/cooldown) is mapped the same way TS migratePlan does. */
         fun fromJson(json: JSONObject): Pair<List<PlanStep>, Boolean> {
-            fun target(key: String): StepTarget? {
-                val o = json.opt(key) as? JSONObject ?: return null
-                return StepTarget(o.optString("type"), o.optInt("sec", 0), o.optInt("m", 0))
+            val stepsArr = json.optJSONArray("steps")
+            val steps = if (stepsArr != null && stepsArr.length() > 0) {
+                label(expandSteps(stepsArr))
+            } else {
+                fun legacyTarget(key: String): StepTarget? {
+                    val o = json.opt(key) as? JSONObject ?: return null
+                    return target(o)
+                }
+                val work = legacyTarget("work") ?: StepTarget("manual")
+                flatten(legacyTarget("warmup"), work, legacyTarget("recovery"), json.optInt("repeats", 1), legacyTarget("cooldown"))
             }
-            val work = target("work") ?: StepTarget("manual")
-            val steps = flatten(target("warmup"), work, target("recovery"), json.optInt("repeats", 1), target("cooldown"))
             return steps to json.optBoolean("autoFinish", true)
         }
     }

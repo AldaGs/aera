@@ -164,3 +164,65 @@ export function planSummary(p: IntervalPlan): string {
   if (parts.length > 4) return `${parts.slice(0, 4).join(' · ')} +${parts.length - 4}`;
   return parts.join(' · ');
 }
+
+const DEFAULT_RUN_PACE_SEC_PER_KM = 360; // 6:00/km
+const DEFAULT_WALK_PACE_SEC_PER_KM = 600; // 10:00/km
+
+/** run/work/warmup/cooldown use run pace; walk/recovery use walk pace. */
+function paceFor(kind: StepKind, pace?: { run?: number; walk?: number }): number {
+  const run = pace?.run ?? DEFAULT_RUN_PACE_SEC_PER_KM;
+  const walk = pace?.walk ?? DEFAULT_WALK_PACE_SEC_PER_KM;
+  // Easy steps (warm-up, walk, recovery, cooldown) at walk pace; run/work at run pace.
+  return kind === 'run' || kind === 'work' ? run : walk;
+}
+
+export interface PlanEstimate {
+  steps: number;
+  sec: number;
+  m: number;
+  approx: boolean; // true when any step's number comes from a pace estimate, not an exact target
+}
+
+/**
+ * Estimated duration/distance for a plan, for the builder meta row. Time
+ * targets are exact for `sec`; every target also gets an `m` estimate via
+ * pace (so a time-only plan still shows a distance), which is why the whole
+ * estimate is `approx` unless every step is a bare distance target.
+ */
+export function planEstimate(p: IntervalPlan, pace?: { run?: number; walk?: number }): PlanEstimate {
+  const steps = flattenPlan(p);
+  let sec = 0;
+  let m = 0;
+  let approx = false;
+  for (const s of steps) {
+    const t = s.target;
+    const stepPace = paceFor(s.kind, pace);
+    if (t.type === 'time') {
+      sec += t.sec;
+      m += (t.sec / stepPace) * 1000;
+      approx = true; // distance side is estimated
+    } else if (t.type === 'distance') {
+      m += t.m;
+      sec += (t.m / 1000) * stepPace;
+      approx = true; // time side is estimated
+    } else if (t.type === 'either') {
+      const distSec = (t.m / 1000) * stepPace;
+      const useSec = Math.min(t.sec, distSec);
+      sec += useSec;
+      m += (useSec / stepPace) * 1000;
+      approx = true;
+    } else {
+      approx = true; // manual: no target, contributes nothing
+    }
+  }
+  return { steps: steps.length, sec, m, approx };
+}
+
+/** "6 steps · ~29 min · ~3.9 km" — ~ only when approx; km part omitted when 0. */
+export function fmtPlanMeta(est: PlanEstimate): string {
+  const tilde = est.approx ? '~' : '';
+  const min = Math.round(est.sec / 60);
+  const parts = [`${est.steps} steps`, `${tilde}${min} min`];
+  if (est.m > 0) parts.push(`${tilde}${(est.m / 1000).toFixed(1)} km`);
+  return parts.join(' · ');
+}

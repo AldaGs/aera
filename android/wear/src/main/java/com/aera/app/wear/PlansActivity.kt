@@ -37,8 +37,9 @@ class PlansActivity : Activity() {
 
     private fun planLabel(plan: JSONObject): String {
         val name = plan.optString("name", "Plan")
-        val repeats = plan.optInt("repeats", 1)
-        return if (repeats > 1) "$name (${repeats}x)" else name
+        val steps = plan.optJSONArray("steps")
+        val n = steps?.length() ?: 0
+        return if (n > 0) "$name ($n steps)" else name
     }
 
     private fun rowButton(label: String, onClick: () -> Unit): Button {

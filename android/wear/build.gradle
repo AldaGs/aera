@@ -45,4 +45,7 @@ dependencies {
     // Ongoing Activity for persistence.
     implementation 'androidx.wear:wear-ongoing:1.0.0'
     testImplementation 'junit:junit:4.13.2'
+    // Real org.json impl for JVM unit tests — the Android stub jar throws
+    // "not mocked" on JSONObject.put, and PlanRunnerTest builds JSON fixtures.
+    testImplementation 'org.json:json:20231013'
 }
