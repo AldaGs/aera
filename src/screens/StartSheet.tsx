@@ -45,6 +45,7 @@ export function StartSheet({
   onClose,
   onStart,
   onStartPlan,
+  onStartWatch,
 }: {
   sport: Sport;
   goalType: GoalType;
@@ -57,6 +58,7 @@ export function StartSheet({
   onClose: () => void;
   onStart: () => void;
   onStartPlan: (plan: IntervalPlan) => void;
+  onStartWatch: (plan: IntervalPlan | null) => Promise<boolean>;
 }) {
   const [planPickerOpen, setPlanPickerOpen] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState<IntervalPlan | null>(null);
@@ -64,14 +66,23 @@ export function StartSheet({
   const [gpsAccuracyM, setGpsAccuracyM] = useState<number | null>(null);
   const [gpsUnavailable, setGpsUnavailable] = useState(false);
   const [syncedAgo, setSyncedAgo] = useState(fmtAgo(getLastSyncAt()));
+  const [recordOn, setRecordOn] = useState<'phone' | 'watch'>('phone');
+  const [watchBattery, setWatchBattery] = useState<number | null>(null);
+  const [watchBatteryAt, setWatchBatteryAt] = useState<number | null>(null);
+  const [watchStart, setWatchStart] = useState<'idle' | 'starting' | 'started' | 'error'>('idle');
 
-  // Watch connection: poll every 5s while the sheet is open (native only).
+  // Watch connection + battery: poll every 5s while the sheet is open (native only).
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) return;
     let active = true;
     const poll = () => {
       WearBridge.isWatchConnected()
-        .then((r) => active && setWatchConnected(r.connected))
+        .then((r) => {
+          if (!active) return;
+          setWatchConnected(r.connected);
+          if (r.connected) WearBridge.pingWatch().catch(() => {});
+          else setRecordOn((cur) => (cur === 'watch' ? 'phone' : cur));
+        })
         .catch(() => active && setWatchConnected(false));
     };
     poll();
@@ -79,6 +90,24 @@ export function StartSheet({
     return () => {
       active = false;
       clearInterval(id);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+    let handle: { remove: () => void } | null = null;
+    let active = true;
+    WearBridge.addListener('battery', (e) => {
+      if (!active) return;
+      setWatchBattery(e.battery);
+      setWatchBatteryAt(Date.now());
+    }).then((h) => {
+      if (active) handle = h;
+      else h.remove();
+    });
+    return () => {
+      active = false;
+      handle?.remove();
     };
   }, []);
 
@@ -196,22 +225,29 @@ export function StartSheet({
 
       <div className="start-record-on">
         <span className="muted small">Record on</span>
-        <div className="radio-card radio-card-selected">
-          <div className="radio-card-icon"><DeviceMobile size={20} className="icon-grad" /></div>
+        <button
+          className={`radio-card ${recordOn === 'phone' ? 'radio-card-selected' : ''}`}
+          onClick={() => setRecordOn('phone')}
+        >
+          <div className="radio-card-icon"><DeviceMobile size={20} className={recordOn === 'phone' ? 'icon-grad' : ''} /></div>
           <div className="radio-card-text">
             <span className="radio-card-title">Phone</span>
             <span className="muted small">Phone GPS · live HR from watch · cues on both</span>
           </div>
-          <span className="radio-dot radio-dot-selected" />
-        </div>
-        <div className="radio-card radio-card-disabled">
-          <div className="radio-card-icon"><Watch size={20} /></div>
+          <span className={`radio-dot ${recordOn === 'phone' ? 'radio-dot-selected' : ''}`} />
+        </button>
+        <button
+          className={`radio-card ${recordOn === 'watch' ? 'radio-card-selected' : ''} ${watchConnected ? '' : 'radio-card-disabled'}`}
+          onClick={() => watchConnected && setRecordOn('watch')}
+          disabled={!watchConnected}
+        >
+          <div className="radio-card-icon"><Watch size={20} className={recordOn === 'watch' ? 'icon-grad' : ''} /></div>
           <div className="radio-card-text">
             <span className="radio-card-title">Watch only</span>
             <span className="muted small">Leave the phone · watch GPS · uploads when back in range</span>
           </div>
-          <span className="radio-dot" />
-        </div>
+          <span className={`radio-dot ${recordOn === 'watch' ? 'radio-dot-selected' : ''}`} />
+        </button>
       </div>
 
       <div className="status-list">
@@ -220,6 +256,9 @@ export function StartSheet({
           <span className="status-label">
             {watchConnected ? 'Galaxy Watch4 connected' : 'Watch not connected'}
           </span>
+          {watchConnected && watchBattery != null && watchBatteryAt != null && Date.now() - watchBatteryAt < 60000 && (
+            <span className="status-value">{watchBattery}%</span>
+          )}
         </div>
         <div className="status-row">
           <span className={`status-dot ${gpsAccuracyM != null && gpsAccuracyM <= GPS_LOCKED_M ? 'status-dot-active' : ''}`} />
@@ -243,10 +282,35 @@ export function StartSheet({
 
       <button
         className="btn start-cta"
-        onClick={() => (selectedPlan ? onStartPlan(selectedPlan) : onStart())}
+        disabled={watchStart === 'starting'}
+        onClick={async () => {
+          if (recordOn === 'watch') {
+            setWatchStart('starting');
+            const ok = await onStartWatch(selectedPlan);
+            if (ok) {
+              setWatchStart('started');
+              setTimeout(onClose, 1200);
+            } else {
+              setWatchStart('error');
+            }
+            return;
+          }
+          if (selectedPlan) onStartPlan(selectedPlan);
+          else onStart();
+        }}
       >
-        <Play size={18} weight="fill" /> Start {sportLabel}
+        <Play size={18} weight="fill" />{' '}
+        {recordOn === 'watch'
+          ? watchStart === 'starting'
+            ? 'Starting on watch…'
+            : watchStart === 'started'
+              ? 'Started on watch — you can leave your phone'
+              : `Start ${sportLabel}`
+          : `Start ${sportLabel}`}
       </button>
+      {recordOn === 'watch' && watchStart === 'error' && (
+        <p className="muted small center">Couldn't reach the watch — try again.</p>
+      )}
 
       {planPickerOpen && (
         <div className="overlay-sub-backdrop" onClick={() => setPlanPickerOpen(false)}>

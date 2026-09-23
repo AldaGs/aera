@@ -18,6 +18,11 @@ export interface PlanChangedEvent {
   json: string;
 }
 
+/** Watch battery reply to a `/aera/ping`. */
+export interface BatteryEvent {
+  battery: number;
+}
+
 /**
  * Bridge to the native WearBridge plugin (Kotlin) that talks to the aera Wear OS
  * companion over the Wearable Data Layer. The watch streams HR to the phone; the
@@ -36,6 +41,14 @@ export interface WearBridgePlugin {
   putPlan(opts: { json: string }): Promise<void>;
   /** Read every plan DataItem currently synced (each a JSON string). */
   getAllPlans(): Promise<{ plans: string[] }>;
+  /**
+   * Send the watch a standalone start command (no live phone recording).
+   * `json` is a full IntervalPlan as JSON; omit it for a free run.
+   * Resolves `{ sent: false }` when no watch node is currently reachable.
+   */
+  startOnWatch(opts: { json?: string; sport: string }): Promise<{ sent: boolean }>;
+  /** Ask the connected watch to report its battery (reply arrives as a `battery` event). */
+  pingWatch(): Promise<void>;
   /** Subscribe to live HR samples pushed from the watch. */
   addListener(
     eventName: 'hr',
@@ -53,6 +66,11 @@ export interface WearBridgePlugin {
   addListener(
     eventName: 'planChanged',
     listener: (event: PlanChangedEvent) => void,
+  ): Promise<PluginListenerHandle>;
+  /** Fires when the watch replies to a `pingWatch()` with its battery level. */
+  addListener(
+    eventName: 'battery',
+    listener: (event: BatteryEvent) => void,
   ): Promise<PluginListenerHandle>;
 }
 

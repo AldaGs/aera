@@ -29,6 +29,10 @@ class WearMessageListener : WearableListenerService() {
                 val cmd = String(event.data).trim()
                 WearBridgePlugin.emitCmd(cmd)
             }
+            "/aera/battery" -> {
+                val pct = String(event.data).trim().toIntOrNull() ?: return
+                WearBridgePlugin.emitBattery(pct)
+            }
         }
     }
 

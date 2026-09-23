@@ -108,13 +108,13 @@ export function Record({ onRecorded }: { onRecorded: () => void }) {
     listPlans().then(setPlans);
   }
 
-  function startRecording() {
+  /** The plan implied by the current goal tags — null means a plain free run. */
+  function buildQuickPlan(): IntervalPlan | null {
     const needSec = goalType === 'time' || goalType === 'either';
     const needDist = goalType === 'distance' || goalType === 'either';
     // A zero goal would be met on the first tick and end the run instantly.
     if (goalType === 'none' || (needSec && goalSec <= 0) || (needDist && goalKm <= 0)) {
-      setRecording(new RecordingEngine(sport));
-      return;
+      return null;
     }
     const target: StepTarget =
       goalType === 'time'
@@ -124,7 +124,7 @@ export function Record({ onRecorded }: { onRecorded: () => void }) {
           : { type: 'either', sec: goalSec, m: Math.round(goalKm * 1000) };
     // kind 'work' stays neutral here — quick goal applies to any sport (run/walk/ride),
     // and 'work' already drives the same cue/CSS treatment as before.
-    const plan: IntervalPlan = {
+    return {
       id: '',
       name: 'Quick goal',
       sport,
@@ -132,7 +132,25 @@ export function Record({ onRecorded }: { onRecorded: () => void }) {
       autoFinish: true,
       createdAt: new Date().toISOString(),
     };
-    startPlan(plan);
+  }
+
+  function startRecording() {
+    const plan = buildQuickPlan();
+    if (plan) startPlan(plan);
+    else setRecording(new RecordingEngine(sport));
+  }
+
+  /** "Watch only": send the same plan the phone path would use to the watch instead
+   * of starting local GPS/RecordingEngine. Returns whether the watch accepted it. */
+  async function startOnWatch(plan: IntervalPlan | null): Promise<boolean> {
+    const p = plan ?? buildQuickPlan();
+    const json = p ? JSON.stringify({ ...p, id: p.id || crypto.randomUUID() }) : undefined;
+    try {
+      const res = await WearBridge.startOnWatch({ sport: p?.sport ?? sport, json });
+      return res.sent;
+    } catch {
+      return false;
+    }
   }
 
   function engineForPlan(plan: IntervalPlan): RecordingEngine {
@@ -366,6 +384,7 @@ export function Record({ onRecorded }: { onRecorded: () => void }) {
             setStartSheetOpen(false);
             startPlan(p);
           }}
+          onStartWatch={startOnWatch}
         />
       )}
 

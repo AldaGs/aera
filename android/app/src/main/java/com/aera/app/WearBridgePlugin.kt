@@ -58,6 +58,14 @@ class WearBridgePlugin : Plugin() {
             data.put("json", json)
             p.notifyListeners("planChanged", data)
         }
+
+        /** Called from [WearMessageListener] when an `/aera/battery` reply arrives. */
+        fun emitBattery(pct: Int) {
+            val p = instance ?: return
+            val data = JSObject()
+            data.put("battery", pct)
+            p.notifyListeners("battery", data)
+        }
     }
 
     override fun load() {
@@ -116,6 +124,52 @@ class WearBridgePlugin : Plugin() {
     @PluginMethod
     fun stopWatch(call: PluginCall) {
         send("/aera/stop", ByteArray(0))
+        call.resolve()
+    }
+
+    /**
+     * Standalone start: sends `/aera/startwatch` with `{sport, plan?}` and resolves
+     * whether a node was actually reachable (unlike the fire-and-forget [send] helper,
+     * the caller needs to know this to show an error in the New run sheet).
+     */
+    @PluginMethod
+    fun startOnWatch(call: PluginCall) {
+        val sport = call.getString("sport") ?: "run"
+        val json = call.getString("json")
+        val payload = JSONObject().put("sport", sport)
+        if (json != null) {
+            try {
+                payload.put("plan", JSONObject(json))
+            } catch (e: Exception) {
+                call.reject("invalid plan json: ${e.message}")
+                return
+            }
+        }
+        val ctx = context
+        Thread {
+            val sent = try {
+                val nodes = Tasks.await(Wearable.getNodeClient(ctx).connectedNodes)
+                if (nodes.isEmpty()) {
+                    false
+                } else {
+                    val mc = Wearable.getMessageClient(ctx)
+                    for (n in nodes) Tasks.await(mc.sendMessage(n.id, "/aera/startwatch", payload.toString().toByteArray()))
+                    true
+                }
+            } catch (e: Exception) {
+                Log.w("WearBridge", "startOnWatch failed: ${e.message}")
+                false
+            }
+            val res = JSObject()
+            res.put("sent", sent)
+            call.resolve(res)
+        }.start()
+    }
+
+    /** Ask the watch to reply with its battery level (`/aera/battery`). */
+    @PluginMethod
+    fun pingWatch(call: PluginCall) {
+        send("/aera/ping", ByteArray(0))
         call.resolve()
     }
 

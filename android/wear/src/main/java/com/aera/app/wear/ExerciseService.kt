@@ -108,7 +108,15 @@ class ExerciseService : Service() {
         workoutId = UUID.randomUUID().toString()
         startedAtMs = System.currentTimeMillis()
         RecState.running = true
-        startForegroundNotification()
+        if (!startForegroundNotification()) {
+            // Background FGS start refused (Android 12+): hand off to a tap-to-start
+            // notification rather than crashing.
+            PhoneListener.postStartNotification(this, sport, planJson)
+            workoutId = ""
+            RecState.running = false
+            stopSelf()
+            return START_NOT_STICKY
+        }
         beginExercise()
         return START_NOT_STICKY
     }
@@ -332,7 +340,8 @@ class ExerciseService : Service() {
 
     // --- Foreground notification (Ongoing Activity), same pattern as HrService. ---
 
-    private fun startForegroundNotification() {
+    /** False if the system refused the foreground start (e.g. from background). */
+    private fun startForegroundNotification(): Boolean {
         val chanId = "aera_exercise"
         val nm = getSystemService(NotificationManager::class.java)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -363,10 +372,16 @@ class ExerciseService : Service() {
         } catch (_: Exception) {
         }
 
-        if (Build.VERSION.SDK_INT >= 34) {
-            startForeground(2, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_HEALTH or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
-        } else {
-            startForeground(2, notif)
+        return try {
+            if (Build.VERSION.SDK_INT >= 34) {
+                startForeground(2, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_HEALTH or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
+            } else {
+                startForeground(2, notif)
+            }
+            true
+        } catch (e: Exception) {
+            Log.w(TAG, "startForeground refused: ${e.message}")
+            false
         }
     }
 
