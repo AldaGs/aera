@@ -3,6 +3,7 @@ package com.aera.app.wear
 import android.content.Context
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -117,16 +119,16 @@ private fun fmtPace(secPerKm: Int): String = if (secPerKm > 0) "${fmtTime(secPer
 private fun fmtKm(m: Double): String = "%.2f".format(m / 1000.0)
 
 /**
- * Full screen: swipe left/right or rotate the bezel to switch 1h/1i/1j; tap toggles the
- * pause/lap/stop overlay (the dedicated Paused screen is a later step — kept minimal here).
+ * Full screen: rotate the bezel to switch 1h/1i/1j. Swipe right or tap pauses (README hardware
+ * note: swipe right = pause screen; tap kept as the simple on-screen fallback since the Top key
+ * is reserved by Wear OS). The F8 lap card overlays automatically while `data.lastLap` is fresh.
  */
 @Composable
-fun LiveScreen(data: LiveData, onPause: () -> Unit, onResume: () -> Unit, onLap: () -> Unit, onStop: () -> Unit, paused: Boolean) {
+fun LiveScreen(data: LiveData, lastLap: RecState.LapInfo?, lastLapAtMs: Long, onPause: () -> Unit) {
     val context = LocalContext.current
     var layout by remember {
         mutableStateOf(LivePrefs.get(context) ?: if (data.hasStep) 2 else 1)
     }
-    var showOverlay by remember { mutableStateOf(false) }
     fun setLayout(l: Int) {
         layout = l.coerceIn(0, 2)
         LivePrefs.set(context, layout)
@@ -152,33 +154,29 @@ fun LiveScreen(data: LiveData, onPause: () -> Unit, onResume: () -> Unit, onLap:
                 true
             }
             .pointerInput(Unit) {
+                // Swipe right → pause (1l). No tap-to-pause: stray taps (sleeves, rain)
+                // would pause the run by accident.
+                var total = 0f
                 detectHorizontalDragGestures(
+                    onDragStart = { total = 0f },
                     onHorizontalDrag = { _, dragAmount ->
-                        if (dragAmount > 25f) setLayout(layout - 1)
-                        else if (dragAmount < -25f) setLayout(layout + 1)
+                        total += dragAmount
+                        if (total > 60f) {
+                            total = Float.NEGATIVE_INFINITY // fire once per gesture
+                            onPause()
+                        }
                     },
-                    onDragEnd = { showOverlay = false },
                 )
             },
     ) {
-        Box(Modifier.fillMaxSize().pointerInput(Unit) {
-            detectTapGestures(onTap = { showOverlay = !showOverlay })
-        }) {
-            when (layout) {
-                0 -> ZoneArcLayout(data)
-                2 -> IntervalLayout(data)
-                else -> MetricStackLayout(data)
-            }
+        when (layout) {
+            0 -> ZoneArcLayout(data)
+            2 -> IntervalLayout(data)
+            else -> MetricStackLayout(data)
         }
-        if (showOverlay) {
-            ControlOverlay(
-                paused = paused,
-                onPause = onPause,
-                onResume = onResume,
-                onLap = onLap,
-                onStop = { showOverlay = false; onStop() },
-                onDismiss = { showOverlay = false },
-            )
+        val now = System.currentTimeMillis()
+        if (lastLap != null && now - lastLapAtMs < 3000) {
+            LapCard(lastLap)
         }
     }
 
@@ -389,37 +387,255 @@ private fun HeartIcon(color: Color, size: androidx.compose.ui.unit.Dp) {
     }
 }
 
+// --- F8 · 1k — lap card (3 s overlay on the live screen) ---
+
 @Composable
-private fun ControlOverlay(paused: Boolean, onPause: () -> Unit, onResume: () -> Unit, onLap: () -> Unit, onStop: () -> Unit, onDismiss: () -> Unit) {
+private fun LapCard(lap: RecState.LapInfo) {
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(
+            Modifier
+                .background(Nocturne.surface, androidx.compose.foundation.shape.RoundedCornerShape(14.dp))
+                .padding(horizontal = 22.dp, vertical = 16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(lap.label, color = Nocturne.accent300, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+            Spacer(Modifier.height(4.dp))
+            Text(fmtTime(lap.lapSec), color = Nocturne.text, fontSize = 40.sp)
+            lap.deltaSec?.let {
+                val sign = if (it > 0) "+" else if (it < 0) "−" else "±"
+                Text("$sign${kotlin.math.abs(it)} s vs lap ${lap.n - 1}", color = Nocturne.neutral500, fontSize = 12.sp)
+            }
+            Spacer(Modifier.height(6.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                Text(fmtKm(lap.distanceM) + " km", color = Nocturne.text, fontSize = 14.sp)
+                if (lap.avgHr > 0) Text("avg ${lap.avgHr}", color = Nocturne.text, fontSize = 14.sp)
+            }
+            Spacer(Modifier.height(6.dp))
+            Text(lap.trigger, color = Nocturne.neutral500, fontSize = 10.sp)
+        }
+    }
+}
+
+// --- F6 · 1l — paused ---
+
+/** Hold-to-end threshold and the second-tap-within window, per the 1l spec. */
+private const val END_HOLD_MS = 1000
+private const val END_TAP_WINDOW_MS = 3000
+
+@Composable
+fun PausedScreen(elapsedSec: Int, distanceM: Double, autoPaused: Boolean, onLap: () -> Unit, onResume: () -> Unit, onEnd: () -> Unit) {
+    var endArmed by remember { mutableStateOf(false) }
+    var holdProgress by remember { mutableFloatStateOf(0f) }
+    var holding by remember { mutableStateOf(false) }
+
+    Box(Modifier.fillMaxSize().background(Nocturne.ground), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text("PAUSED", color = Nocturne.neutral500, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+            Spacer(Modifier.height(6.dp))
+            Text(fmtTime(elapsedSec), color = Nocturne.neutral500.copy(alpha = 0.9f), fontSize = 40.sp)
+            Spacer(Modifier.height(4.dp))
+            val reason = if (autoPaused) " · auto-paused" else ""
+            Text("${fmtKm(distanceM)} km$reason", color = Nocturne.neutral500, fontSize = 12.sp)
+            Spacer(Modifier.height(22.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.Bottom) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Box(
+                        Modifier.size(48.dp).clip(androidx.compose.foundation.shape.CircleShape)
+                            .background(Nocturne.surface)
+                            .pointerInput(Unit) { detectTapGestures(onTap = { onLap() }) },
+                        contentAlignment = Alignment.Center,
+                    ) { FlagIcon(Nocturne.text, 18.dp) }
+                    Spacer(Modifier.height(4.dp))
+                    Text("Lap", color = Nocturne.neutral500, fontSize = 10.sp)
+                }
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Box(
+                        Modifier.size(64.dp).clip(androidx.compose.foundation.shape.CircleShape)
+                            .background(Nocturne.accent900)
+                            .border(1.5.dp, Nocturne.accent, androidx.compose.foundation.shape.CircleShape)
+                            .pointerInput(Unit) { detectTapGestures(onTap = { onResume() }) },
+                        contentAlignment = Alignment.Center,
+                    ) { PlayIcon(Nocturne.accent300, 22.dp) }
+                    Spacer(Modifier.height(4.dp))
+                    Text("Resume", color = Nocturne.neutral500, fontSize = 10.sp)
+                }
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Box(
+                        Modifier.size(48.dp).clip(androidx.compose.foundation.shape.CircleShape)
+                            .background(Nocturne.surface)
+                            .pointerInput(Unit) {
+                                detectTapGestures(
+                                    onPress = {
+                                        holding = true
+                                        try { tryAwaitRelease() } finally { holding = false }
+                                    },
+                                    onTap = { if (endArmed) onEnd() else endArmed = true },
+                                )
+                            },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (holdProgress > 0f) {
+                            Canvas(Modifier.fillMaxSize()) {
+                                drawArc(
+                                    color = Nocturne.accent400,
+                                    startAngle = -90f,
+                                    sweepAngle = 360f * holdProgress,
+                                    useCenter = false,
+                                    style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round),
+                                )
+                            }
+                        }
+                        StopIcon(Nocturne.text, 16.dp)
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    Text(if (endArmed) "Tap again" else "End", color = Nocturne.neutral500, fontSize = 10.sp)
+                }
+            }
+        }
+    }
+
+    // Second-tap arm window: drop back to "End" if nothing follows within 3 s.
+    androidx.compose.runtime.LaunchedEffect(endArmed) {
+        if (endArmed) {
+            kotlinx.coroutines.delay(END_TAP_WINDOW_MS.toLong())
+            endArmed = false
+        }
+    }
+
+    // Hold-to-end: fills the progress ring while pressed; fires onEnd at END_HOLD_MS.
+    androidx.compose.runtime.LaunchedEffect(holding) {
+        if (holding) {
+            val start = System.currentTimeMillis()
+            while (holding) {
+                val elapsed = System.currentTimeMillis() - start
+                holdProgress = (elapsed / END_HOLD_MS.toFloat()).coerceIn(0f, 1f)
+                if (elapsed >= END_HOLD_MS) { onEnd(); break }
+                kotlinx.coroutines.delay(16)
+            }
+        } else {
+            holdProgress = 0f
+        }
+    }
+}
+
+// --- F7 · 1m — summary ---
+
+@Composable
+fun SummaryScreen(
+    sport: String,
+    distanceM: Double,
+    durationSec: Int,
+    avgPaceSecPerKm: Int,
+    avgHr: Int,
+    zoneSecs: IntArray,
+    syncState: String,
+    onDismiss: () -> Unit,
+) {
     Box(
         Modifier
             .fillMaxSize()
-            .background(Nocturne.ground.copy(alpha = 0.82f))
-            .pointerInput(Unit) { detectTapGestures(onTap = { onDismiss() }) },
+            .background(Nocturne.ground)
+            .pointerInput(Unit) { detectTapGestures(onTap = { onDismiss() }) }
+            .pointerInput(Unit) { detectHorizontalDragGestures(onHorizontalDrag = { _, d -> if (kotlin.math.abs(d) > 25f) onDismiss() }) },
         contentAlignment = Alignment.Center,
     ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
-            OverlayButton("Lap", 48.dp) { onLap() }
-            OverlayButton(if (paused) "Resume" else "Pause", 64.dp, accent = true) { if (paused) onResume() else onPause() }
-            OverlayButton("End", 48.dp) { onStop() }
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            CheckCircleIcon(Nocturne.accent400, 24.dp)
+            Spacer(Modifier.height(6.dp))
+            val sportLabel = when (sport) { "walk" -> "Walk"; "ride" -> "Ride"; else -> "Run" }
+            Text("$sportLabel saved", color = Nocturne.neutral500, fontSize = 13.sp)
+            Spacer(Modifier.height(14.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(28.dp)) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("${fmtKm(distanceM)} km", color = Nocturne.text, fontSize = 28.sp)
+                    Text(fmtTime(durationSec), color = Nocturne.text, fontSize = 28.sp)
+                }
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(fmtPace(avgPaceSecPerKm), color = Nocturne.text, fontSize = 18.sp)
+                    Text(if (avgHr > 0) "$avgHr avg bpm" else "-- avg bpm", color = Nocturne.text, fontSize = 18.sp)
+                }
+            }
+            Spacer(Modifier.height(14.dp))
+            ZoneStrip(zoneSecs, width = 150.dp, height = 5.dp)
+            Spacer(Modifier.height(10.dp))
+            val syncLabel = when (syncState) {
+                "syncing" -> "Syncing…"
+                "synced" -> "Synced to phone"
+                else -> "Will sync when phone is nearby"
+            }
+            Text(syncLabel, color = Nocturne.neutral500, fontSize = 10.sp)
         }
     }
 }
 
 @Composable
-private fun OverlayButton(label: String, diameter: androidx.compose.ui.unit.Dp, accent: Boolean = false, onClick: () -> Unit) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(
-            Modifier
-                .size(diameter)
-                .clip(androidx.compose.foundation.shape.CircleShape)
-                .background(if (accent) Nocturne.accent900 else Nocturne.surface)
-                .pointerInput(Unit) { detectTapGestures(onTap = { onClick() }) },
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(label.take(1), color = if (accent) Nocturne.accent300 else Nocturne.text, fontSize = 18.sp)
+private fun ZoneStrip(zoneSecs: IntArray, width: androidx.compose.ui.unit.Dp, height: androidx.compose.ui.unit.Dp) {
+    val total = zoneSecs.sum().coerceAtLeast(1)
+    Row(Modifier.width(width).height(height), horizontalArrangement = Arrangement.spacedBy(1.dp)) {
+        for (i in 0 until 5) {
+            val frac = zoneSecs[i].toFloat() / total
+            if (frac > 0f) {
+                Box(
+                    Modifier
+                        .width(width * frac)
+                        .fillMaxHeight()
+                        .clip(androidx.compose.foundation.shape.RoundedCornerShape(2.dp))
+                        .background(Nocturne.zoneColors[i]),
+                )
+            }
         }
-        Spacer(Modifier.height(4.dp))
-        Text(label, color = Nocturne.neutral500, fontSize = 10.sp)
+    }
+}
+
+// --- shared canvas icons (consistent with HeartIcon: no vector-drawable asset for a few glyphs) ---
+
+@Composable
+private fun FlagIcon(color: Color, size: androidx.compose.ui.unit.Dp) {
+    Canvas(Modifier.size(size)) {
+        val w = size.toPx()
+        drawLine(color, Offset(w * 0.2f, 0f), Offset(w * 0.2f, w), strokeWidth = w * 0.1f, cap = StrokeCap.Round)
+        val path = Path().apply {
+            moveTo(w * 0.25f, w * 0.05f)
+            lineTo(w * 0.9f, w * 0.28f)
+            lineTo(w * 0.25f, w * 0.5f)
+            close()
+        }
+        drawPath(path, color)
+    }
+}
+
+@Composable
+private fun PlayIcon(color: Color, size: androidx.compose.ui.unit.Dp) {
+    Canvas(Modifier.size(size)) {
+        val w = size.toPx()
+        val path = Path().apply {
+            moveTo(w * 0.22f, w * 0.08f)
+            lineTo(w * 0.9f, w * 0.5f)
+            lineTo(w * 0.22f, w * 0.92f)
+            close()
+        }
+        drawPath(path, color)
+    }
+}
+
+@Composable
+private fun StopIcon(color: Color, size: androidx.compose.ui.unit.Dp) {
+    Canvas(Modifier.size(size)) {
+        val w = size.toPx()
+        drawRoundRect(color, topLeft = Offset(0f, 0f), size = Size(w, w), cornerRadius = androidx.compose.ui.geometry.CornerRadius(w * 0.15f))
+    }
+}
+
+@Composable
+private fun CheckCircleIcon(color: Color, size: androidx.compose.ui.unit.Dp) {
+    Canvas(Modifier.size(size)) {
+        val w = size.toPx()
+        drawCircle(color, radius = w / 2f, center = Offset(w / 2f, w / 2f), style = Stroke(width = w * 0.09f))
+        val path = Path().apply {
+            moveTo(w * 0.28f, w * 0.52f)
+            lineTo(w * 0.44f, w * 0.68f)
+            lineTo(w * 0.74f, w * 0.32f)
+        }
+        drawPath(path, color, style = Stroke(width = w * 0.1f, cap = StrokeCap.Round))
     }
 }

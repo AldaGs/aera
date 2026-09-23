@@ -70,6 +70,18 @@ class ExerciseService : Service() {
     private var lastPersistWall = 0L
     private var finished = false
 
+    // HR samples for F7's zone-seconds strip — kept separate from `points` since GPS fixes
+    // are often sparse/partial (see docs memory on Samsung workout data) but HR ticks every update.
+    private val hrSamples = mutableListOf<Pair<Long, Int>>()
+
+    // F8 lap card: current open lap's start + running HR average.
+    private var lapStartMs = 0L
+    private var lapStartDist = 0.0
+    private var lapHrSum = 0L
+    private var lapHrCount = 0
+    private var lapIndex = 0
+    private var prevLapSec: Int? = null
+
     private data class RecPoint(
         val t: Long,
         val lat: Double,
@@ -192,6 +204,11 @@ class ExerciseService : Service() {
             val v = it.value.toInt()
             if (v > 0) lastHr = v
         }
+        if (lastHr > 0) {
+            hrSamples.add(activeMs to lastHr)
+            lapHrSum += lastHr
+            lapHrCount++
+        }
         val speed = update.latestMetrics.getData(DataType.SPEED).lastOrNull()?.value
         update.latestMetrics.getData(DataType.LOCATION).lastOrNull()?.value?.let { loc ->
             points.add(
@@ -215,6 +232,7 @@ class ExerciseService : Service() {
         RecState.paceSecPerKm = if (speed != null && speed > 0.3) (1000.0 / speed).toInt() else 0
 
         runner?.let { r ->
+            val prevLabel = r.currentStep.label
             val changed = r.onUpdate(activeMs, distanceM)
             RecState.stepLabel = r.currentStep.label
             RecState.stepKind = r.currentStep.kind
@@ -227,18 +245,42 @@ class ExerciseService : Service() {
             RecState.stepKindTotal = r.currentStep.kindTotal
             RecState.nextStepLabel = r.nextStepLabel() ?: ""
             RecState.complete = r.complete
-            if (changed) onStepChanged(r, activeMs)
+            if (changed) onStepChanged(r, activeMs, prevLabel)
         }
         maybePersist()
     }
 
-    private fun onStepChanged(r: PlanRunner, activeMs: Long) {
+    private fun onStepChanged(r: PlanRunner, activeMs: Long, endedStepLabel: String) {
         lapStartsMs.add(activeMs)
         if (!r.complete) lapMeta.add(r.currentStep.kind to r.currentStep.label)
+        closeLap(activeMs, distanceM, trigger = endedStepLabel)
         vibrate(if (r.complete) "done" else r.currentStep.kind)
         if (r.complete && r.autoFinish) {
             exerciseClient.endExerciseAsync()
         }
+    }
+
+    /** Closes the current open lap and publishes it to RecState.lastLap for the F8 3 s card. */
+    private fun closeLap(nowMs: Long, distanceNow: Double, trigger: String) {
+        lapIndex++
+        val lapSec = ((nowMs - lapStartMs) / 1000).toInt()
+        val deltaSec = RunMath.lapDeltaSec(lapSec, prevLapSec)
+        val avgHr = if (lapHrCount > 0) (lapHrSum / lapHrCount).toInt() else 0
+        RecState.lastLap = RecState.LapInfo(
+            n = lapIndex,
+            label = "Lap $lapIndex",
+            lapSec = lapSec,
+            deltaSec = deltaSec,
+            distanceM = distanceNow - lapStartDist,
+            avgHr = avgHr,
+            trigger = trigger,
+        )
+        RecState.lastLapAtMs = System.currentTimeMillis()
+        prevLapSec = lapSec
+        lapStartMs = nowMs
+        lapStartDist = distanceNow
+        lapHrSum = 0L
+        lapHrCount = 0
     }
 
     // --- Controls called from RecordActivity ---
@@ -251,18 +293,22 @@ class ExerciseService : Service() {
         scope.launch { try { exerciseClient.resumeExerciseAsync().get() } catch (_: Exception) {} }
     }
 
-    /** Lap/Next button: advances a manual plan step, else just marks a lap boundary. */
+    /** Lap/Next button (on-screen Lap, or a guarded stem key — see RecordActivity.onKeyDown):
+     * advances a manual plan step, else just marks a lap boundary. */
     private fun doLapOrNext() {
         val r = runner
         if (r != null && !r.complete) {
+            val prevLabel = r.currentStep.label
             val changed = r.next(lastActiveMs, distanceM)
             RecState.stepLabel = r.currentStep.label
             RecState.stepKind = r.currentStep.kind
             RecState.stepIndex = r.stepIndex
             RecState.complete = r.complete
-            if (changed) onStepChanged(r, lastActiveMs)
+            if (changed) onStepChanged(r, lastActiveMs, prevLabel)
         } else {
             lapStartsMs.add(lastActiveMs)
+            closeLap(lastActiveMs, distanceM, trigger = "Lap button")
+            vibrate("lap")
             scope.launch { try { exerciseClient.markLapAsync().get() } catch (_: Exception) {} }
         }
     }
@@ -287,7 +333,6 @@ class ExerciseService : Service() {
 
     private fun finishAndSave() {
         finished = true
-        RecState.running = false
         try {
             workoutsDir().mkdirs()
             File(workoutsDir(), "$workoutId.json").writeText(buildWorkoutJson().toString())
@@ -295,6 +340,17 @@ class ExerciseService : Service() {
         } catch (e: Exception) {
             Log.w(TAG, "finishAndSave failed: ${e.message}")
         }
+        val durationSec = (lastActiveMs / 1000).toInt()
+        RecState.sumWorkoutId = workoutId
+        RecState.sumDistanceM = distanceM
+        RecState.sumDurationSec = durationSec
+        RecState.sumAvgPaceSecPerKm = RunMath.avgPaceSecPerKm(distanceM, durationSec)
+        RecState.sumAvgHr = if (hrSamples.isNotEmpty()) (hrSamples.sumOf { it.second } / hrSamples.size) else 0
+        RecState.sumZoneSecs = Zones.zoneSeconds(hrSamples)
+        RecState.syncState = "pending" // Phase 5 DataClient upload will drive this.
+        RecState.summaryReady = true
+        // Last: RecordActivity closes when running goes false without a summary ready.
+        RecState.running = false
     }
 
     private fun workoutsDir() = File(filesDir, "workouts")
@@ -403,6 +459,7 @@ class ExerciseService : Service() {
             "work", "run" -> longArrayOf(0, 220, 120, 220)
             "recovery", "walk" -> longArrayOf(0, 120)
             "done" -> longArrayOf(0, 400)
+            "lap" -> longArrayOf(0, 60, 60, 60)
             else -> longArrayOf(0, 180)
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

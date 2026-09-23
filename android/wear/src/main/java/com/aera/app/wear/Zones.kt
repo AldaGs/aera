@@ -32,4 +32,25 @@ object Zones {
         val pct = (hr.toFloat() / maxHr).coerceIn(0f, 1f)
         return 150f + 240f * pct
     }
+
+    /**
+     * Accumulates seconds-in-zone from a chronological list of (elapsedMs, hr) samples, for the
+     * F7 summary zone strip. Each sample's HR is attributed the seconds since the previous
+     * sample (rectangle rule) — a hr==0 sample (no reading) contributes to whichever zone the
+     * last-known reading was in, same as the live screens' "--" fallback never breaking the strip.
+     *
+     * ponytail: rectangle-rule attribution, not sample-rate weighted; fine at typical 1 Hz HR.
+     */
+    fun zoneSeconds(samples: List<Pair<Long, Int>>, maxHr: Int = DEFAULT_MAX_HR): IntArray {
+        val secs = IntArray(5)
+        if (samples.size < 2) return secs
+        var lastHr = samples.first().second
+        for (i in 1 until samples.size) {
+            val (t, hr) = samples[i]
+            val dt = ((t - samples[i - 1].first) / 1000).toInt().coerceAtLeast(0)
+            if (hr > 0) lastHr = hr
+            if (lastHr > 0) secs[index(lastHr, maxHr)] += dt
+        }
+        return secs
+    }
 }

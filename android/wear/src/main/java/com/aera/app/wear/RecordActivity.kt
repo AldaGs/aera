@@ -7,6 +7,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.view.KeyEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.getValue
@@ -21,7 +22,8 @@ import org.json.JSONObject
  * Standalone recording screen: elapsed/distance/HR + current plan step, mirroring
  * ExerciseService (via RecState) the same way MainActivity mirrors HrService/AeraState.
  * Requests the runtime permissions ExerciseService needs, then starts it, then shows
- * the live layouts (1h/1i/1j) from LiveScreen, polling RecState every 500 ms.
+ * live (1h/1i/1j) / paused (1l) / summary (1m) from RecState, polling every 500 ms.
+ * Stays open through Summary — that screen calls finish() itself on dismiss.
  */
 class RecordActivity : ComponentActivity() {
     private val handler = Handler(Looper.getMainLooper())
@@ -33,8 +35,8 @@ class RecordActivity : ComponentActivity() {
     private val refresh = object : Runnable {
         override fun run() {
             if (RecState.running) sawRunning = true
-            if (sawRunning && !RecState.running && !RecState.paused) {
-                // ExerciseService stopped itself (ended/failed) — leave the screen.
+            if (sawRunning && !RecState.running && !RecState.paused && !RecState.summaryReady) {
+                // ExerciseService stopped itself without a summary (e.g. failed to start) — leave.
                 finish()
                 return
             }
@@ -48,20 +50,50 @@ class RecordActivity : ComponentActivity() {
         setContent {
             AeraTheme {
                 @Suppress("UNUSED_EXPRESSION") refreshTick // read to recompose on tick
-                LiveScreen(
-                    data = LiveData.from(RecState),
-                    paused = RecState.paused,
-                    onPause = { ExerciseService.pause() },
-                    onResume = { ExerciseService.resume() },
-                    onLap = { ExerciseService.lapOrNext() },
-                    onStop = { ExerciseService.stop() },
-                )
+                when {
+                    RecState.summaryReady -> SummaryScreen(
+                        sport = intent.getStringExtra(EXTRA_SPORT) ?: sportOf(intent.getStringExtra(EXTRA_PLAN_JSON)),
+                        distanceM = RecState.sumDistanceM,
+                        durationSec = RecState.sumDurationSec,
+                        avgPaceSecPerKm = RecState.sumAvgPaceSecPerKm,
+                        avgHr = RecState.sumAvgHr,
+                        zoneSecs = RecState.sumZoneSecs,
+                        syncState = RecState.syncState,
+                        onDismiss = { finish() },
+                    )
+                    RecState.paused -> PausedScreen(
+                        elapsedSec = RecState.elapsedSec,
+                        distanceM = RecState.distanceM,
+                        autoPaused = RecState.autoPaused,
+                        onLap = { ExerciseService.lapOrNext() },
+                        onResume = { ExerciseService.resume() },
+                        onEnd = { ExerciseService.stop() },
+                    )
+                    else -> LiveScreen(
+                        data = LiveData.from(RecState),
+                        lastLap = RecState.lastLap,
+                        lastLapAtMs = RecState.lastLapAtMs,
+                        onPause = { ExerciseService.pause() },
+                    )
+                }
             }
         }
 
         val sport = intent.getStringExtra(EXTRA_SPORT) ?: "run"
         val planJson = intent.getStringExtra(EXTRA_PLAN_JSON)
         ensurePermissionsThenStart(sport, planJson)
+    }
+
+    /** Bottom key doubles as manual lap while recording — guarded per-device since not every
+     * Wear OS watch exposes a KEYCODE_STEM_* for it; falls back to the on-screen Lap button. */
+    override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+        if (RecState.running &&
+            (keyCode == KeyEvent.KEYCODE_STEM_1 || keyCode == KeyEvent.KEYCODE_STEM_2 || keyCode == KeyEvent.KEYCODE_STEM_3)
+        ) {
+            ExerciseService.lapOrNext()
+            return true
+        }
+        return super.onKeyDown(keyCode, event)
     }
 
     override fun onResume() {

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Recording screen: swipe-right is our pause gesture (1l), so the system
+         swipe-to-dismiss must not close the activity mid-run. -->
+    <style name="Theme.Aera.Record" parent="@android:style/Theme.DeviceDefault">
+        <item name="android:windowSwipeToDismiss">false</item>
+    </style>
+</resources>
