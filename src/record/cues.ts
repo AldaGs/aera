@@ -20,12 +20,14 @@ export async function fireCue(kind: CueKind): Promise<void> {
   try {
     switch (kind) {
       case 'work':
+      case 'run':
         // Entering effort — assertive double heavy buzz.
         await Haptics.impact({ style: ImpactStyle.Heavy });
         await delay(120);
         await Haptics.impact({ style: ImpactStyle.Heavy });
         break;
       case 'recovery':
+      case 'walk':
         // Ease off — single light tap.
         await Haptics.impact({ style: ImpactStyle.Light });
         break;

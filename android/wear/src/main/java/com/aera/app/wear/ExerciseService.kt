@@ -377,8 +377,8 @@ class ExerciseService : Service() {
             @Suppress("DEPRECATION") getSystemService(VIBRATOR_SERVICE) as? Vibrator
         } ?: return
         val pattern = when (kind) {
-            "work" -> longArrayOf(0, 220, 120, 220)
-            "recovery" -> longArrayOf(0, 120)
+            "work", "run" -> longArrayOf(0, 220, 120, 220)
+            "recovery", "walk" -> longArrayOf(0, 120)
             "done" -> longArrayOf(0, 400)
             else -> longArrayOf(0, 180)
         }

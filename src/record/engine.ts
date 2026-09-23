@@ -392,7 +392,7 @@ export class RecordingEngine {
       if (!meta) return lap;
       return {
         ...lap,
-        type: meta.kind === 'recovery' ? 'rest' : this.sport,
+        type: meta.kind === 'recovery' ? 'rest' : meta.kind === 'walk' ? 'walk' : this.sport,
         label: meta.label,
       };
     });
@@ -428,10 +428,9 @@ export class RecordingEngine {
       }
       fraction = Math.max(fracTime, fracDist);
     }
-    const reps = this.plan.filter((s) => s.kind === 'work').length;
-    const rep = this.plan
-      .slice(0, this.stepIndex + 1)
-      .filter((s) => s.kind === 'work').length;
+    const isRep = (s: PlanStep) => s.kind === 'work' || s.kind === 'run';
+    const reps = this.plan.filter(isRep).length;
+    const rep = this.plan.slice(0, this.stepIndex + 1).filter(isRep).length;
     const next = this.plan[this.stepIndex + 1];
     return {
       stepIndex: this.stepIndex,

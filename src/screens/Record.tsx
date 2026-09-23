@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { SneakerMove, Bicycle, DeviceMobile, Watch, Play, Plus, PersonSimpleWalk, ArrowCounterClockwise, Repeat, Trash } from '@phosphor-icons/react';
 import type { Sport } from '@/model/workout';
-import { db, saveWorkout, listPlans, deletePlan } from '@/db/db';
+import { saveWorkout, listPlans, getPlan, deletePlan } from '@/db/db';
 import type { IntervalPlan, StepTarget } from '@/model/intervalPlan';
 import { flattenPlan, planSummary } from '@/model/intervalPlan';
 import { makeSampleWorkout } from '@/importers/sampleData';
@@ -71,7 +71,7 @@ export function Record({ onRecorded }: { onRecorded: () => void }) {
             } catch {
               // bare id (older watch build)
             }
-            const plan = await db.plans.get(planId);
+            const plan = await getPlan(planId);
             const engine = plan
               ? engineForPlan(plan)
               : (() => {
@@ -119,15 +119,13 @@ export function Record({ onRecorded }: { onRecorded: () => void }) {
         : goalType === 'distance'
           ? { type: 'distance', m: Math.round(goalKm * 1000) }
           : { type: 'either', sec: goalSec, m: Math.round(goalKm * 1000) };
+    // kind 'work' stays neutral here — quick goal applies to any sport (run/walk/ride),
+    // and 'work' already drives the same cue/CSS treatment as before.
     const plan: IntervalPlan = {
       id: '',
       name: 'Quick goal',
       sport,
-      warmup: null,
-      work: target,
-      recovery: null,
-      repeats: 1,
-      cooldown: null,
+      steps: [{ id: crypto.randomUUID(), kind: 'work', target }],
       autoFinish: true,
       createdAt: new Date().toISOString(),
     };

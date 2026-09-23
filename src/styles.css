@@ -1063,11 +1063,13 @@ body {
   border: 1px solid var(--line);
   background: var(--surface);
 }
-.plan-banner-work {
+.plan-banner-work,
+.plan-banner-run {
   background: linear-gradient(120deg, color-mix(in srgb, var(--color-accent) 13%, transparent), color-mix(in srgb, var(--color-accent) 4%, transparent));
   border-color: color-mix(in srgb, var(--color-accent) 33%, transparent);
 }
-.plan-banner-recovery {
+.plan-banner-recovery,
+.plan-banner-walk {
   background: color-mix(in srgb, var(--color-positive) 9%, transparent);
   border-color: color-mix(in srgb, var(--color-positive) 27%, transparent);
 }

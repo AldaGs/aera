@@ -4,7 +4,8 @@
  * No framework; asserts and exits non-zero on failure.
  */
 import { RecordingEngine } from '../src/record/engine';
-import type { PlanStep } from '../src/model/intervalPlan';
+import type { PlanStep, IntervalPlan } from '../src/model/intervalPlan';
+import { migratePlan, flattenPlan, planSummary } from '../src/model/intervalPlan';
 
 function assert(cond: boolean, msg: string) {
   if (!cond) {
@@ -67,6 +68,95 @@ function assert(cond: boolean, msg: string) {
   let autoPausedNoPlan = false;
   engine2.subscribe((s) => (autoPausedNoPlan = s.autoPaused));
   assert(autoPausedNoPlan, 'auto-pause fires with no plan');
+}
+
+// --- migratePlan: legacy shape -> steps, and idempotent ---
+{
+  const legacy: IntervalPlan = {
+    id: 'p1', name: 'Legacy', sport: 'run',
+    steps: [],
+    warmup: { type: 'time', sec: 300 },
+    work: { type: 'time', sec: 135 },
+    recovery: { type: 'time', sec: 105 },
+    repeats: 3,
+    cooldown: { type: 'time', sec: 300 },
+    autoFinish: true,
+    createdAt: '2026-01-01T00:00:00.000Z',
+  };
+  const migrated = migratePlan(legacy);
+  assert(migrated.warmup === undefined, 'migratePlan strips legacy warmup field');
+  assert(migrated.steps.length === 3, 'migratePlan: warmup + repeat-block + cooldown = 3 top-level steps');
+  const block = migrated.steps[1];
+  assert('repeat' in block && block.repeat === 3, 'migratePlan wraps work/recovery in a repeat block');
+  assert('repeat' in block && block.steps.length === 2, 'repeat block holds work + recovery');
+
+  const twice = migratePlan(migrated);
+  assert(JSON.stringify(twice.steps) === JSON.stringify(migrated.steps), 'migratePlan is idempotent');
+}
+
+// --- flattenPlan: per-kind counting labels ---
+{
+  const p: IntervalPlan = {
+    id: 'p2', name: 'Mixed', sport: 'run', autoFinish: true, createdAt: '',
+    steps: [
+      { id: 'wu', kind: 'warmup', target: { type: 'time', sec: 300 } },
+      { id: 'w1', kind: 'walk', target: { type: 'time', sec: 120 } },
+      { id: 'r1', kind: 'run', target: { type: 'distance', m: 1000 } },
+      { id: 'w2', kind: 'walk', target: { type: 'time', sec: 120 } },
+      { id: 'r2', kind: 'run', target: { type: 'distance', m: 1500 } },
+      { id: 'rec', kind: 'recovery', target: { type: 'time', sec: 300 } },
+    ],
+  };
+  const flat = flattenPlan(p);
+  const labels = flat.map((s) => s.label);
+  assert(
+    JSON.stringify(labels) ===
+      JSON.stringify(['Warm-up', 'Walk 1/2', 'Run 1/2', 'Walk 2/2', 'Run 2/2', 'Recovery']),
+    `flattenPlan labels per-kind counts: ${labels.join(', ')}`,
+  );
+}
+
+// --- flattenPlan: repeat block expands with 'Work i/n' labels ---
+{
+  const p: IntervalPlan = {
+    id: 'p3', name: 'Repeats', sport: 'run', autoFinish: true, createdAt: '',
+    steps: [
+      {
+        id: 'block', repeat: 3,
+        steps: [
+          { id: 'w', kind: 'work', target: { type: 'time', sec: 120 } },
+          { id: 'r', kind: 'recovery', target: { type: 'time', sec: 60 } },
+        ],
+      },
+    ],
+  };
+  const flat = flattenPlan(p);
+  assert(flat.length === 6, 'repeat block of 3x(work,recovery) flattens to 6 steps');
+  assert(flat[0].label === 'Work 1/3' && flat[4].label === 'Work 3/3', 'legacy work labels count i/n');
+  assert(flat[1].label === 'Recovery 1/3', 'recovery inside a repeat block also counts i/n');
+}
+
+// --- planSummary: repeat block formatting + truncation after 4 items ---
+{
+  const p: IntervalPlan = {
+    id: 'p4', name: 'Long', sport: 'run', autoFinish: true, createdAt: '',
+    steps: [
+      { id: 'wu', kind: 'warmup', target: { type: 'time', sec: 300 } },
+      {
+        id: 'block', repeat: 5,
+        steps: [
+          { id: 'r', kind: 'run', target: { type: 'distance', m: 800 } },
+          { id: 'rec', kind: 'recovery', target: { type: 'time', sec: 90 } },
+        ],
+      },
+      { id: 'w1', kind: 'walk', target: { type: 'time', sec: 120 } },
+      { id: 'w2', kind: 'walk', target: { type: 'time', sec: 120 } },
+      { id: 'cd', kind: 'cooldown', target: { type: 'time', sec: 300 } },
+    ],
+  };
+  const summary = planSummary(p);
+  assert(summary.includes('5×(Run 800 m / Rec 1:30)'), `planSummary formats repeat block: ${summary}`);
+  assert(summary.endsWith('+1'), `planSummary truncates after 4 items: ${summary}`);
 }
 
 if (process.exitCode) {

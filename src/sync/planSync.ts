@@ -1,7 +1,7 @@
 import { Capacitor } from '@capacitor/core';
 import { db } from '@/db/db';
 import type { IntervalPlan } from '@/model/intervalPlan';
-import { planUpdatedAt } from '@/model/intervalPlan';
+import { migratePlan, planUpdatedAt } from '@/model/intervalPlan';
 import { WearBridge } from '@/plugins/wearHr';
 
 /**
@@ -34,7 +34,7 @@ export async function pushOnePlan(plan: IntervalPlan): Promise<void> {
 /** Merge one incoming plan (from the native 'planChanged' event) into Dexie. */
 export async function mergeIncomingPlan(json: string): Promise<void> {
   try {
-    const remote = JSON.parse(json) as IntervalPlan;
+    const remote = migratePlan(JSON.parse(json) as IntervalPlan);
     const local = await db.plans.get(remote.id);
     const winner = mergePlan(local, remote);
     if (winner !== local) await db.plans.put(winner);
@@ -56,7 +56,7 @@ export async function syncPlans(): Promise<void> {
     const remotePlans = res.plans
       .map((j) => {
         try {
-          return JSON.parse(j) as IntervalPlan;
+          return migratePlan(JSON.parse(j) as IntervalPlan);
         } catch {
           return null;
         }

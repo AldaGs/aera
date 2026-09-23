@@ -2,6 +2,7 @@ import Dexie, { type Table } from 'dexie';
 import type { TrackPoint, Workout } from '@/model/workout';
 import type { Goal } from '@/model/goal';
 import type { IntervalPlan } from '@/model/intervalPlan';
+import { migratePlan } from '@/model/intervalPlan';
 import { deriveSummary } from '@/metrics/deriveSummary';
 
 // Workout metadata + cached summary live in one table for fast list views.
@@ -54,6 +55,31 @@ class AeraDB extends Dexie {
       goals: 'id, createdAt, deadline',
       plans: 'id, createdAt',
     });
+    // v6: plans move from the fixed warmup/work/recovery/repeats/cooldown shape
+    // to an ordered `steps` list (see model/intervalPlan.ts). Migrate every
+    // stored plan and bump updatedAt so the new shape re-syncs to the watch.
+    this.version(6)
+      .stores({
+        workouts: 'id, sport, startedAt, athleteId, externalId',
+        tracks: 'workoutId',
+        goals: 'id, createdAt, deadline',
+        plans: 'id, createdAt',
+      })
+      .upgrade(async (tx) => {
+        await tx
+          .table('plans')
+          .toCollection()
+          .modify((p: IntervalPlan) => {
+            const migrated = migratePlan(p);
+            delete p.warmup;
+            delete p.work;
+            delete p.recovery;
+            delete p.repeats;
+            delete p.cooldown;
+            Object.assign(p, migrated);
+            p.updatedAt = new Date().toISOString();
+          });
+      });
   }
 }
 
@@ -131,7 +157,13 @@ export async function deleteGoal(id: string): Promise<void> {
 /** Non-deleted plans, newest first. Includes sync tombstones' survivors only. */
 export async function listPlans(): Promise<IntervalPlan[]> {
   const all = await db.plans.orderBy('createdAt').toArray();
-  return all.filter((p) => !p.deleted).reverse();
+  return all.filter((p) => !p.deleted).reverse().map(migratePlan);
+}
+
+/** Load one plan by id, migrated to the current `steps` shape. */
+export async function getPlan(id: string): Promise<IntervalPlan | undefined> {
+  const p = await db.plans.get(id);
+  return p ? migratePlan(p) : undefined;
 }
 
 export async function savePlan(plan: IntervalPlan): Promise<IntervalPlan> {

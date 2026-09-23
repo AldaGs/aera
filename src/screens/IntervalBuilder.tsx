@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { X, Minus, Plus } from '@phosphor-icons/react';
 import { savePlan } from '@/db/db';
 import type { IntervalPlan, StepTarget } from '@/model/intervalPlan';
-import { planSummary } from '@/model/intervalPlan';
+import { migratePlan, planSummary } from '@/model/intervalPlan';
 import type { Sport } from '@/model/workout';
 import { pushOnePlan } from '@/sync/planSync';
 
@@ -29,16 +29,20 @@ export function IntervalBuilder({
   const [cooldown, setCooldown] = useState<StepTarget | null>({ type: 'time', sec: 300 });
   const [autoFinish, setAutoFinish] = useState(true);
 
-  const preview: IntervalPlan = {
+  // Builder still edits the legacy warmup/work/recovery/repeats/cooldown shape
+  // (replaced by the 2a/2b step-timeline UI in C1); migratePlan converts it to
+  // the `steps` shape this plan is saved and synced in.
+  const legacyPreview: IntervalPlan = {
     id: '', name, sport, warmup, work, recovery, repeats, cooldown, autoFinish,
-    createdAt: '',
+    steps: [], createdAt: '',
   };
+  const preview = migratePlan(legacyPreview);
 
   async function submit() {
     const plan: IntervalPlan = {
       ...preview,
       id: crypto.randomUUID(),
-      name: name.trim() || defaultName(preview),
+      name: name.trim() || defaultName(legacyPreview),
       createdAt: new Date().toISOString(),
     };
     const saved = await savePlan(plan);
