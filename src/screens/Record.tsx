@@ -7,7 +7,7 @@ import { flattenPlan, planSummary, planEstimate, fmtPlanMeta } from '@/model/int
 import { makeSampleWorkout } from '@/importers/sampleData';
 import { loadConnectivity, saveConnectivity } from '@/store/profile';
 import { LiveRecorder } from '@/screens/LiveRecorder';
-import { IntervalBuilder, fmtSec, parseSec } from '@/screens/IntervalBuilder';
+import { IntervalBuilder } from '@/screens/IntervalBuilder';
 import { RecordingEngine, hasResumableRecording } from '@/record/engine';
 import {
   samsungAvailable,
@@ -17,6 +17,7 @@ import {
 import { WearBridge } from '@/plugins/wearHr';
 import { Capacitor, type PluginListenerHandle } from '@capacitor/core';
 import { syncPlans, mergeIncomingPlan, pushOnePlan } from '@/sync/planSync';
+import { StartSheet } from '@/screens/StartSheet';
 
 /**
  * Record tab. Live phone-GPS recording is still pending; the working data path
@@ -37,6 +38,7 @@ export function Record({ onRecorded }: { onRecorded: () => void }) {
   const [goalType, setGoalType] = useState<'none' | 'time' | 'distance' | 'either'>('none');
   const [goalSec, setGoalSec] = useState(1800);
   const [goalKm, setGoalKm] = useState(5);
+  const [startSheetOpen, setStartSheetOpen] = useState(false);
   const conn = loadConnectivity();
   const canSync = samsungAvailable();
 
@@ -259,37 +261,8 @@ export function Record({ onRecorded }: { onRecorded: () => void }) {
         </button>
       </div>
 
-      <div className="field">
-        <span className="field-label">Goal</span>
-        <div className="seg seg-sm">
-          <button className={`seg-opt ${goalType === 'none' ? 'seg-opt-active' : ''}`} onClick={() => setGoalType('none')}>None</button>
-          <button className={`seg-opt ${goalType === 'time' ? 'seg-opt-active' : ''}`} onClick={() => setGoalType('time')}>Time</button>
-          <button className={`seg-opt ${goalType === 'distance' ? 'seg-opt-active' : ''}`} onClick={() => setGoalType('distance')}>Distance</button>
-          <button className={`seg-opt ${goalType === 'either' ? 'seg-opt-active' : ''}`} onClick={() => setGoalType('either')}>Either</button>
-        </div>
-        {(goalType === 'time' || goalType === 'either') && (
-          <input
-            className="input"
-            value={fmtSec(goalSec)}
-            onChange={(e) => setGoalSec(parseSec(e.target.value))}
-            placeholder="mm:ss"
-            inputMode="numeric"
-          />
-        )}
-        {(goalType === 'distance' || goalType === 'either') && (
-          <input
-            className="input"
-            type="number"
-            value={goalKm}
-            onChange={(e) => setGoalKm(parseFloat(e.target.value) || 0)}
-            placeholder="km"
-            inputMode="decimal"
-          />
-        )}
-      </div>
-
       <div className="record-hero">
-        <button className="record-start" onClick={startRecording} aria-label="Start recording">
+        <button className="record-start" onClick={() => setStartSheetOpen(true)} aria-label="New run">
           <Play size={40} weight="fill" />
         </button>
         <span className="muted small center">
@@ -373,6 +346,28 @@ export function Record({ onRecorded }: { onRecorded: () => void }) {
       <button className="btn-ghost" onClick={addSample}>
         <Plus size={18} /> Add sample {sport} (dev)
       </button>
+
+      {startSheetOpen && (
+        <StartSheet
+          sport={sport}
+          goalType={goalType}
+          goalSec={goalSec}
+          goalKm={goalKm}
+          onGoalTypeChange={setGoalType}
+          onGoalSecChange={setGoalSec}
+          onGoalKmChange={setGoalKm}
+          plans={plans}
+          onClose={() => setStartSheetOpen(false)}
+          onStart={() => {
+            setStartSheetOpen(false);
+            startRecording();
+          }}
+          onStartPlan={(p) => {
+            setStartSheetOpen(false);
+            startPlan(p);
+          }}
+        />
+      )}
 
       {(builderOpen || editingPlan) && (
         <IntervalBuilder

@@ -43,6 +43,13 @@ export async function mergeIncomingPlan(json: string): Promise<void> {
   }
 }
 
+let lastSyncAt: string | null = null;
+
+/** ISO timestamp of the last successful `syncPlans()` call, or null if none yet this session. */
+export function getLastSyncAt(): string | null {
+  return lastSyncAt;
+}
+
 /**
  * Pull every plan currently on the watch, merge LWW into Dexie, then push any
  * local plan (including tombstones) that's newer than or missing from the
@@ -77,6 +84,7 @@ export async function syncPlans(): Promise<void> {
         await pushPlan(local);
       }
     }
+    lastSyncAt = new Date().toISOString();
   } catch {
     // best-effort; sync failures must never break the UI
   }
