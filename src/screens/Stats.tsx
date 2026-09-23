@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Medal, TrendingUp, ChevronRight, Flame, Mountain, Timer, Route } from 'lucide-react';
+import { Medal, TrendUp, CaretRight, Fire, Mountains, Timer, Path } from '@phosphor-icons/react';
 import { listWorkouts, type WorkoutMeta } from '@/db/db';
 import {
   sumTotals,
@@ -57,12 +57,12 @@ export function Stats({
       </div>
 
       <div className="stat-grid">
-        <BigStat icon={Route} value={fmtDistance(totals.distanceM)} label="Distance" />
+        <BigStat icon={Path} value={fmtDistance(totals.distanceM)} label="Distance" />
         <BigStat icon={Timer} value={fmtDuration(totals.durationSec)} label="Moving time" />
-        <BigStat icon={Flame} value={`${totals.count}`} label="Activities" />
-        <BigStat icon={Mountain} value={`${Math.round(totals.elevGainM)} m`} label="Elevation" />
+        <BigStat icon={Fire} value={`${totals.count}`} label="Activities" />
+        <BigStat icon={Mountains} value={`${Math.round(totals.elevGainM)} m`} label="Elevation" />
         {totals.totalSteps > 0 && (
-          <BigStat icon={Route} value={fmtSteps(totals.totalSteps)} label="Steps" />
+          <BigStat icon={Path} value={fmtSteps(totals.totalSteps)} label="Steps" />
         )}
       </div>
 
@@ -72,7 +72,7 @@ export function Stats({
 
       <section className="panel">
         <div className="panel-head">
-          <TrendingUp size={18} className="icon-grad" />
+          <TrendUp size={18} className="icon-grad" />
           <h2>Weekly distance</h2>
         </div>
         <TrendBars buckets={buckets} />
@@ -104,7 +104,7 @@ export function Stats({
 
       <section className="panel">
         <div className="panel-head">
-          <Route size={18} className="icon-grad" />
+          <Path size={18} className="icon-grad" />
           <h2>All activities</h2>
         </div>
         <ul className="activity-list">
@@ -117,7 +117,7 @@ export function Stats({
                   <span className="muted small">{fmtDate(w.startedAt)}</span>
                 </div>
                 <span className="activity-dist">{fmtDistance(w.summary.distanceM)}</span>
-                <ChevronRight size={18} className="muted" />
+                <CaretRight size={18} className="muted" />
               </button>
             </li>
           ))}
@@ -133,7 +133,7 @@ function BigStat({
   value,
   label,
 }: {
-  icon: typeof Route;
+  icon: typeof Path;
   value: string;
   label: string;
 }) {

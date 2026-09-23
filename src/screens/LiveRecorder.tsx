@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Pause, Play, Square, Flag, X, Satellite, SkipForward, Heart } from 'lucide-react';
+import { Pause, Play, Stop, Flag, X, GpsFix, SkipForward, Heart } from '@phosphor-icons/react';
 import type { LatLngBounds, Sport } from '@/model/workout';
 import { RecordingEngine, type LiveStats, type PlanProgress } from '@/record/engine';
 import { startLocationUpdates, type LocationWatcher } from '@/record/location';
@@ -135,11 +135,11 @@ export function LiveRecorder({
         <div className="recorder-chips">
           {watchConnected && (
             <span className="gps-chip gps-ok">
-              <Heart size={14} /> Watch
+              <Heart size={14} weight="fill" /> Watch
             </span>
           )}
           <span className={`gps-chip ${geoError ? 'gps-bad' : path.length ? 'gps-ok' : 'gps-wait'}`}>
-            <Satellite size={14} /> {geoError ? 'No GPS' : path.length ? 'GPS' : 'Acquiring…'}
+            <GpsFix size={14} /> {geoError ? 'No GPS' : path.length ? 'GPS' : 'Acquiring…'}
           </span>
         </div>
       </header>
@@ -187,17 +187,17 @@ export function LiveRecorder({
         </button>
         {paused ? (
           <button className="rec-btn rec-main" onClick={() => engineRef.current.resume()}>
-            <Play size={30} fill="currentColor" />
+            <Play size={30} weight="fill" />
             <span>Resume</span>
           </button>
         ) : (
           <button className="rec-btn rec-main" onClick={() => engineRef.current.pause()}>
-            <Pause size={30} fill="currentColor" />
+            <Pause size={30} weight="fill" />
             <span>Pause</span>
           </button>
         )}
         <button className="rec-btn rec-stop" onClick={stop} disabled={saving}>
-          <Square size={22} fill="currentColor" />
+          <Stop size={22} weight="fill" />
           <span>{saving ? 'Saving…' : 'Finish'}</span>
         </button>
       </div>

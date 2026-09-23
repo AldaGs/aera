@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Heart, Share2, Mountain, Timer, Gauge, MapPin } from 'lucide-react';
+import { Heart, ShareNetwork, Mountains, Timer, Gauge, MapPin } from '@phosphor-icons/react';
 import { listWorkouts, type WorkoutMeta } from '@/db/db';
 import { RouteMap } from '@/ui/RouteMap';
 import { ProfileButton } from '@/screens/Profile';
@@ -111,16 +111,16 @@ function FeedCard({
             value={showPace ? fmtPace(w.summary.avgPaceSecPerKm) : fmtSpeed(w.summary.avgSpeedKmh)}
             label={showPace ? 'Pace' : 'Speed'}
           />
-          <FeedStat icon={Mountain} value={`${Math.round(w.summary.elevGainM)} m`} label="Elev" />
+          <FeedStat icon={Mountains} value={`${Math.round(w.summary.elevGainM)} m`} label="Elev" />
         </div>
       </button>
 
       <div className="feed-actions">
         <button className="action-btn">
-          <Heart size={18} /> Kudos
+          <Heart size={18} weight="fill" /> Kudos
         </button>
         <button className="action-btn" onClick={onShare}>
-          <Share2 size={18} /> Share
+          <ShareNetwork size={18} /> Share
         </button>
       </div>
     </li>

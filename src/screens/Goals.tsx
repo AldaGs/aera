@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Target, Plus, X, Trash2, Check } from 'lucide-react';
+import { Target, Plus, X, Trash, Check } from '@phosphor-icons/react';
 import { listGoals, saveGoal, deleteGoal, type WorkoutMeta } from '@/db/db';
 import type { Goal, GoalMetric } from '@/model/goal';
 import type { Sport } from '@/model/workout';
@@ -57,7 +57,7 @@ export function GoalsSection({ workouts }: { workouts: WorkoutMeta[] }) {
                     {p.done && <Check size={14} className="goal-check" />} {g.title}
                   </span>
                   <button className="goal-del" onClick={() => remove(g.id)} aria-label="Delete goal">
-                    <Trash2 size={15} />
+                    <Trash size={15} />
                   </button>
                 </div>
                 <div className="goal-bar">

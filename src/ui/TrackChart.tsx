@@ -14,7 +14,7 @@ export interface ChartPoint {
  */
 export function TrackChart({
   points,
-  color = 'url(#aera-grad)',
+  color = 'var(--accent)',
   activeX,
   onScrub,
   format,

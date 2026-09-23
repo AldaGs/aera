@@ -1,12 +1,12 @@
-import { House, CirclePlay, ChartColumn } from 'lucide-react';
-import type { LucideIcon } from 'lucide-react';
+import { House, PlayCircle, ChartBar } from '@phosphor-icons/react';
+import type { Icon } from '@phosphor-icons/react';
 
 export type Tab = 'home' | 'record' | 'stats';
 
-const TABS: { id: Tab; label: string; icon: LucideIcon }[] = [
+const TABS: { id: Tab; label: string; icon: Icon }[] = [
   { id: 'home', label: 'Home', icon: House },
-  { id: 'record', label: 'Record', icon: CirclePlay },
-  { id: 'stats', label: 'Stats', icon: ChartColumn },
+  { id: 'record', label: 'Record', icon: PlayCircle },
+  { id: 'stats', label: 'Stats', icon: ChartBar },
 ];
 
 export function TabBar({
@@ -27,11 +27,7 @@ export function TabBar({
             onClick={() => onChange(id)}
             aria-current={isActive ? 'page' : undefined}
           >
-            <IconCmp
-              size={24}
-              strokeWidth={isActive ? 2.4 : 2}
-              className={isActive ? 'icon-grad' : ''}
-            />
+            <IconCmp size={22} weight={isActive ? 'fill' : 'regular'} />
             <span>{label}</span>
           </button>
         );

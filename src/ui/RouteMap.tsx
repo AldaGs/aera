@@ -57,7 +57,7 @@ export function RouteMap({
       <path
         d={d}
         fill="none"
-        stroke="url(#aera-grad)"
+        stroke="var(--color-accent-400)"
         strokeWidth={strokeWidth}
         strokeLinecap="round"
         strokeLinejoin="round"

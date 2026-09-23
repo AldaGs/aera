@@ -9,7 +9,7 @@ import { fmtDistance } from '@/format';
 
 export type InsightTone = 'good' | 'warn' | 'info';
 
-/** A generated insight card. `icon` is a lucide icon name the UI maps. */
+/** A generated insight card. `icon` is a Phosphor icon name the UI maps. */
 export interface Insight {
   id: string;
   icon: string;

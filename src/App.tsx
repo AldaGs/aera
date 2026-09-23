@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { GradientDefs } from '@/ui/Icon';
 import { TabBar, type Tab } from '@/nav/TabBar';
 import { Home } from '@/screens/Home';
 import { Record } from '@/screens/Record';
@@ -22,8 +21,6 @@ export function App() {
 
   return (
     <div className="app">
-      <GradientDefs />
-
       <main className="app-main">
         {tab === 'home' && (
           <Home

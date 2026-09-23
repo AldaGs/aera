@@ -17,9 +17,9 @@
     "@capacitor/haptics": "^8.0.2",
     "@capacitor/share": "^8.0.1",
     "@fontsource/inter": "^5.3.0",
+    "@phosphor-icons/react": "^2.1.10",
     "capacitor-health": "^8.1.2",
     "dexie": "^4.0.10",
-    "lucide-react": "^1.22.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },

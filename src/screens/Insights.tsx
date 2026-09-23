@@ -1,22 +1,22 @@
 import {
   Lightbulb,
-  TrendingUp,
-  TrendingDown,
-  Flame,
-  Activity,
+  TrendUp,
+  TrendDown,
+  Fire,
+  Pulse,
   Calendar,
-  Route,
-} from 'lucide-react';
+  Path,
+} from '@phosphor-icons/react';
 import type { WorkoutMeta } from '@/db/db';
 import { computeInsights, type Insight } from '@/metrics/insights';
 
 const ICONS: Record<string, typeof Lightbulb> = {
-  'trending-up': TrendingUp,
-  'trending-down': TrendingDown,
-  flame: Flame,
-  activity: Activity,
+  'trending-up': TrendUp,
+  'trending-down': TrendDown,
+  flame: Fire,
+  activity: Pulse,
   calendar: Calendar,
-  route: Route,
+  route: Path,
 };
 
 export function InsightsSection({ workouts }: { workouts: WorkoutMeta[] }) {

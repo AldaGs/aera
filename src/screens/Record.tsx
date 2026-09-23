@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Footprints, Bike, Smartphone, Watch, Play, Plus, PersonStanding, RotateCcw, Repeat, Trash2 } from 'lucide-react';
+import { SneakerMove, Bicycle, DeviceMobile, Watch, Play, Plus, PersonSimpleWalk, ArrowCounterClockwise, Repeat, Trash } from '@phosphor-icons/react';
 import type { Sport } from '@/model/workout';
 import { db, saveWorkout, listPlans, deletePlan } from '@/db/db';
 import type { IntervalPlan, StepTarget } from '@/model/intervalPlan';
@@ -241,21 +241,21 @@ export function Record({ onRecorded }: { onRecorded: () => void }) {
           className={`sport-opt ${sport === 'run' ? 'sport-opt-active' : ''}`}
           onClick={() => setSport('run')}
         >
-          <Footprints size={22} className={sport === 'run' ? 'icon-grad' : ''} />
+          <SneakerMove size={22} className={sport === 'run' ? 'icon-grad' : ''} />
           Run
         </button>
         <button
           className={`sport-opt ${sport === 'walk' ? 'sport-opt-active' : ''}`}
           onClick={() => setSport('walk')}
         >
-          <PersonStanding size={22} className={sport === 'walk' ? 'icon-grad' : ''} />
+          <PersonSimpleWalk size={22} className={sport === 'walk' ? 'icon-grad' : ''} />
           Walk
         </button>
         <button
           className={`sport-opt ${sport === 'ride' ? 'sport-opt-active' : ''}`}
           onClick={() => setSport('ride')}
         >
-          <Bike size={22} className={sport === 'ride' ? 'icon-grad' : ''} />
+          <Bicycle size={22} className={sport === 'ride' ? 'icon-grad' : ''} />
           Ride
         </button>
       </div>
@@ -291,7 +291,7 @@ export function Record({ onRecorded }: { onRecorded: () => void }) {
 
       <div className="record-hero">
         <button className="record-start" onClick={startRecording} aria-label="Start recording">
-          <Play size={40} fill="currentColor" />
+          <Play size={40} weight="fill" />
         </button>
         <span className="muted small center">
           Start a live {sport === 'run' ? 'run' : sport === 'walk' ? 'walk' : 'ride'} with GPS tracking
@@ -300,7 +300,7 @@ export function Record({ onRecorded }: { onRecorded: () => void }) {
 
       {canResume && (
         <button className="btn resume-banner" onClick={resumeRecording}>
-          <RotateCcw size={18} /> Resume unfinished recording
+          <ArrowCounterClockwise size={18} /> Resume unfinished recording
         </button>
       )}
 
@@ -326,10 +326,10 @@ export function Record({ onRecorded }: { onRecorded: () => void }) {
                     <span className="plan-name">{p.name}</span>
                     <span className="muted small">{planSummary(p)}</span>
                   </div>
-                  <Play size={20} className="icon-grad" />
+                  <Play size={20} weight="fill" className="icon-grad" />
                 </button>
                 <button className="plan-del" onClick={() => removePlan(p.id)} aria-label="Delete interval">
-                  <Trash2 size={16} />
+                  <Trash size={16} />
                 </button>
               </li>
             ))}
@@ -339,7 +339,7 @@ export function Record({ onRecorded }: { onRecorded: () => void }) {
 
       <div className="source-list">
         <SourceRow
-          icon={Smartphone}
+          icon={DeviceMobile}
           title="Record on phone"
           subtitle="GPS + background tracking from this device"
           status="Ready"
@@ -391,7 +391,7 @@ function SourceRow({
   status,
   enabled,
 }: {
-  icon: typeof Smartphone;
+  icon: typeof DeviceMobile;
   title: string;
   subtitle: string;
   status: string;

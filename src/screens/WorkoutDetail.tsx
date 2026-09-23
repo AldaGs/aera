@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { X, Share2, Mountain, Heart, Timer, Gauge, MapPin, Flame, Trash2, Zap, Activity, Footprints, Repeat, TrendingUp } from 'lucide-react';
+import { X, ShareNetwork, Mountains, Heart, Timer, Gauge, MapPin, Fire, Trash, Lightning, Pulse, SneakerMove, Repeat, TrendUp } from '@phosphor-icons/react';
 import { getWorkout, deleteWorkout } from '@/db/db';
 import type { Lap, Sport, Workout } from '@/model/workout';
 import { RouteMap } from '@/ui/RouteMap';
@@ -92,9 +92,9 @@ export function WorkoutDetail({
             value={showPace ? fmtPace(s.avgPaceSecPerKm) : fmtSpeed(s.avgSpeedKmh)}
             label={showPace ? 'Avg pace' : 'Avg speed'}
           />
-          <BigStat icon={Mountain} value={`${Math.round(s.elevGainM)} m`} label="Elev gain" />
+          <BigStat icon={Mountains} value={`${Math.round(s.elevGainM)} m`} label="Elev gain" />
           <BigStat icon={Heart} value={s.avgHr ? `${Math.round(s.avgHr)}` : '—'} label="Avg HR" />
-          <BigStat icon={Flame} value={s.maxHr ? `${Math.round(s.maxHr)}` : '—'} label="Max HR" />
+          <BigStat icon={Fire} value={s.maxHr ? `${Math.round(s.maxHr)}` : '—'} label="Max HR" />
           {showPace && s.gradeAdjustedPaceSecPerKm != null && (
             <BigStat
               icon={Gauge}
@@ -105,14 +105,14 @@ export function WorkoutDetail({
           {/* Cadence */}
           {s.avgCadence != null && (
             <BigStat
-              icon={Activity}
+              icon={Pulse}
               value={fmtCadence(s.avgCadence, w.sport)}
               label="Avg cadence"
             />
           )}
           {s.maxCadence != null && (
             <BigStat
-              icon={Activity}
+              icon={Pulse}
               value={fmtCadence(s.maxCadence, w.sport)}
               label="Max cadence"
             />
@@ -120,17 +120,17 @@ export function WorkoutDetail({
           {/* Steps (run/walk) */}
           {showPace && s.totalSteps != null && (
             <BigStat
-              icon={Footprints}
+              icon={SneakerMove}
               value={fmtSteps(s.totalSteps)}
               label="Steps"
             />
           )}
           {/* Power (ride) */}
           {isRide && s.avgPower != null && (
-            <BigStat icon={Zap} value={fmtPower(s.avgPower)} label="Avg power" />
+            <BigStat icon={Lightning} value={fmtPower(s.avgPower)} label="Avg power" />
           )}
           {isRide && s.maxPower != null && (
-            <BigStat icon={Zap} value={fmtPower(s.maxPower)} label="Max power" />
+            <BigStat icon={Lightning} value={fmtPower(s.maxPower)} label="Max power" />
           )}
           {/* VO2 Max */}
           {s.vo2Max != null && (
@@ -141,10 +141,10 @@ export function WorkoutDetail({
             />
           )}
           {s.calories != null && (
-            <BigStat icon={Flame} value={`${s.calories}`} label="Calories" />
+            <BigStat icon={Fire} value={`${s.calories}`} label="Calories" />
           )}
           {s.trainingLoad != null && (
-            <BigStat icon={TrendingUp} value={`${s.trainingLoad}`} label="Training load" />
+            <BigStat icon={TrendUp} value={`${s.trainingLoad}`} label="Training load" />
           )}
         </div>
 
@@ -166,7 +166,7 @@ export function WorkoutDetail({
               <ChartPanel icon={Gauge} title="Pace">
                 <TrackChart
                   points={buildPoints(paceSeries(track))}
-                  color="url(#aera-grad)"
+                  color="var(--accent)"
                   activeX={scrubX}
                   onScrub={setScrubX}
                   format={(v) => fmtPace(v)}
@@ -176,7 +176,7 @@ export function WorkoutDetail({
             )}
 
             {s.elevGainM > 0 && (
-              <ChartPanel icon={Mountain} title="Elevation">
+              <ChartPanel icon={Mountains} title="Elevation">
                 <TrackChart
                   points={buildPoints(track.map((p) => p.alt))}
                   activeX={scrubX}
@@ -201,7 +201,7 @@ export function WorkoutDetail({
             )}
 
             {track.some((p) => p.cad != null) && (
-              <ChartPanel icon={Activity} title="Cadence">
+              <ChartPanel icon={Pulse} title="Cadence">
                 <TrackChart
                   points={buildPoints(track.map((p) => p.cad))}
                   color="var(--color-accent-400)"
@@ -227,7 +227,7 @@ export function WorkoutDetail({
             )}
 
             {isRide && track.some((p) => p.power != null) && (
-              <ChartPanel icon={Zap} title="Power">
+              <ChartPanel icon={Lightning} title="Power">
                 <TrackChart
                   points={buildPoints(track.map((p) => p.power))}
                   color="var(--color-accent-300)"
@@ -257,7 +257,7 @@ export function WorkoutDetail({
         {s.hrZones && s.hrZones.some((z) => z > 0) && (
           <section className="panel">
             <div className="panel-head">
-              <Heart size={18} className="icon-grad" />
+              <Heart size={18} weight="fill" className="icon-grad" />
               <h2>HR zones</h2>
             </div>
             <HrZones zones={s.hrZones} />
@@ -267,7 +267,7 @@ export function WorkoutDetail({
         {(s.bestEfforts?.length ?? 0) > 0 && (
           <section className="panel">
             <div className="panel-head">
-              <Flame size={18} className="icon-grad" />
+              <Fire size={18} className="icon-grad" />
               <h2>Best efforts</h2>
             </div>
             <ul className="record-list">
@@ -296,10 +296,10 @@ export function WorkoutDetail({
           )}
 
         <button className="btn" onClick={() => onShare(id)}>
-          <Share2 size={18} /> Share
+          <ShareNetwork size={18} /> Share
         </button>
         <button className="btn-ghost btn-danger" onClick={handleDelete} disabled={deleting}>
-          <Trash2 size={18} /> {deleting ? 'Deleting…' : 'Delete activity'}
+          <Trash size={18} /> {deleting ? 'Deleting…' : 'Delete activity'}
         </button>
       </div>
     </div>

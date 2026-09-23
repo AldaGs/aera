@@ -97,10 +97,10 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* Any icon/SVG element opting into the brand gradient stroke. */
-.icon-grad,
-.icon-grad * {
-  stroke: url(#aera-grad);
+/* Any icon opting into the accent tint (Phosphor icons fill with currentColor,
+   so this is a plain color, not a gradient stroke). */
+.icon-grad {
+  color: var(--accent);
 }
 
 .app {
@@ -153,17 +153,27 @@ body {
   justify-content: center;
   gap: 8px;
   width: 100%;
-  background: linear-gradient(120deg, var(--accent), var(--accent-2));
-  color: #fff;
-  border: none;
+  background: transparent;
+  color: var(--accent);
+  border: 1px solid var(--accent);
   padding: 14px;
   border-radius: 14px;
   font-weight: 500;
   font-size: 15px;
   cursor: pointer;
 }
+.btn:hover {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.btn:active {
+  background: color-mix(in srgb, var(--color-accent-400) 22%, transparent);
+}
+.btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 .btn:disabled {
-  opacity: 0.5;
+  opacity: 0.45;
   cursor: default;
 }
 .btn-ghost {
@@ -172,7 +182,7 @@ body {
   justify-content: center;
   gap: 8px;
   width: 100%;
-  background: var(--surface-2);
+  background: transparent;
   color: var(--text);
   border: 1px solid var(--line);
   padding: 12px;
@@ -180,17 +190,27 @@ body {
   font-weight: 500;
   cursor: pointer;
 }
+.btn-ghost:hover {
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+}
+.btn-ghost:active {
+  background: color-mix(in srgb, var(--text) 14%, transparent);
+}
+.btn-ghost:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
 .btn-danger {
   margin-top: 10px;
   color: #ff5a4d;
   border-color: rgba(255, 90, 77, 0.35);
 }
 .btn-danger:disabled {
-  opacity: 0.6;
+  opacity: 0.45;
   cursor: default;
 }
 .btn-sm {
-  background: var(--surface-2);
+  background: transparent;
   color: var(--text);
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -198,8 +218,11 @@ body {
   font-weight: 500;
   cursor: pointer;
 }
+.btn-sm:hover {
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+}
 .btn-sm:disabled {
-  opacity: 0.5;
+  opacity: 0.45;
 }
 .icon-btn {
   background: transparent;
@@ -215,12 +238,11 @@ body {
   bottom: 0;
   left: 0;
   right: 0;
-  height: calc(var(--tabbar-h) + env(safe-area-inset-bottom, 0px));
-  padding-bottom: env(safe-area-inset-bottom, 0px);
+  padding: 10px 0 calc(16px + env(safe-area-inset-bottom, 0px));
   display: flex;
   background: color-mix(in srgb, var(--color-bg) 93%, transparent);
   backdrop-filter: blur(12px);
-  border-top: 1px solid var(--line);
+  border-top: 1px solid var(--color-divider);
   z-index: 20;
 }
 .tab {
@@ -232,13 +254,13 @@ body {
   gap: 3px;
   background: transparent;
   border: none;
-  color: var(--muted);
+  color: var(--color-neutral-500);
   font-size: 11px;
   font-weight: 500;
   cursor: pointer;
 }
 .tab-active {
-  color: var(--text);
+  color: var(--color-accent-300);
 }
 
 /* ---------- profile button / avatar ---------- */
@@ -320,8 +342,88 @@ body {
 .card {
   background: var(--surface);
   border-radius: var(--radius);
-  border: 1px solid var(--line);
+  box-shadow: var(--shadow-sm);
   overflow: hidden;
+}
+
+/* — inputs (Nocturne base, shared by every className="input") — */
+.input {
+  width: 100%;
+  min-height: 36px;
+  padding: 6px 10px;
+  font: inherit;
+  font-size: 14px;
+  color: var(--text);
+  caret-color: var(--accent);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+}
+.input:hover {
+  border-color: color-mix(in srgb, var(--text) 45%, transparent);
+}
+.input:focus-visible {
+  border-color: var(--accent);
+  outline: none;
+}
+
+/* — tags — */
+.tag {
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  padding: 3px 10px;
+  border-radius: calc(var(--radius-md) * 0.75);
+}
+.tag-accent {
+  background: var(--color-accent-800);
+  color: var(--color-accent-100);
+}
+.tag-neutral {
+  background: var(--color-neutral-800);
+  color: var(--color-neutral-100);
+}
+.tag-outline {
+  border: 1px solid var(--accent);
+  color: var(--accent);
+}
+
+/* — toggle switch (className="toggle" on a checkbox input) — */
+.toggle {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 30px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  position: relative;
+  cursor: pointer;
+  flex: none;
+}
+.toggle::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--color-neutral-400);
+  transition: left 0.15s ease, background 0.15s ease;
+}
+.toggle:checked {
+  background: var(--color-accent-800);
+  border-color: var(--accent);
+}
+.toggle:checked::after {
+  left: 14px;
+  background: var(--color-accent-300);
+}
+.toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 .feed-card-main {
   display: block;
@@ -442,17 +544,20 @@ body {
   width: 120px;
   height: 120px;
   border-radius: 50%;
-  border: none;
-  color: #fff;
-  background: linear-gradient(120deg, var(--accent), var(--accent-2));
+  border: 1.5px solid var(--accent);
+  color: var(--accent);
+  background: transparent;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  box-shadow: 0 12px 40px -12px var(--color-accent-glow);
+  box-shadow: 0 0 30px -8px var(--accent);
+}
+.record-start:hover {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
 .record-start:disabled {
-  opacity: 0.55;
+  opacity: 0.45;
   cursor: default;
 }
 .source-list {
@@ -517,9 +622,8 @@ body {
 .seg {
   display: flex;
   background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  padding: 4px;
+  border-radius: var(--radius-md);
+  padding: 3px;
   gap: 4px;
   margin-bottom: 18px;
 }
@@ -533,14 +637,14 @@ body {
   border: none;
   color: var(--muted);
   padding: 8px;
-  border-radius: 9px;
+  border-radius: calc(var(--radius-md) - 2px);
   font-weight: 500;
   cursor: pointer;
 }
 .range-opt-active,
 .seg-opt-active {
-  color: #fff;
-  background: linear-gradient(120deg, var(--accent), var(--accent-2));
+  color: var(--color-accent-100);
+  background: var(--color-accent-800);
 }
 
 .stat-grid {
@@ -632,10 +736,11 @@ body {
   display: flex;
   justify-content: space-between;
   padding: 10px 0;
-  border-bottom: 1px solid var(--line);
+  background: linear-gradient(to right, transparent, var(--line) 48px, var(--line) calc(100% - 48px), transparent)
+    no-repeat bottom / 100% 1px;
 }
 .record-row:last-child {
-  border-bottom: none;
+  background: none;
 }
 .record-value {
   font-weight: 500;
@@ -709,9 +814,9 @@ body {
   align-items: center;
   gap: 12px;
   width: 100%;
-  background: transparent;
   border: none;
-  border-bottom: 1px solid var(--line);
+  background: linear-gradient(to right, transparent, var(--line) 48px, var(--line) calc(100% - 48px), transparent)
+    no-repeat bottom / 100% 1px;
   color: inherit;
   padding: 12px 0;
   cursor: pointer;
@@ -803,10 +908,11 @@ body {
   align-items: center;
   justify-content: space-between;
   padding: 12px 0;
-  border-bottom: 1px solid var(--line);
+  background: linear-gradient(to right, transparent, var(--line) 48px, var(--line) calc(100% - 48px), transparent)
+    no-repeat bottom / 100% 1px;
 }
 .field:last-child {
-  border-bottom: none;
+  background: none;
 }
 .field-label {
   display: flex;

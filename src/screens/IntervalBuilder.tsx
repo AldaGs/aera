@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { X, Minus, Plus } from 'lucide-react';
+import { X, Minus, Plus } from '@phosphor-icons/react';
 import { savePlan } from '@/db/db';
 import type { IntervalPlan, StepTarget } from '@/model/intervalPlan';
 import { planSummary } from '@/model/intervalPlan';
@@ -103,7 +103,12 @@ export function IntervalBuilder({
 
         <label className="field">
           <span className="field-label">Auto-finish when done</span>
-          <input type="checkbox" checked={autoFinish} onChange={(e) => setAutoFinish(e.target.checked)} />
+          <input
+            type="checkbox"
+            className="toggle"
+            checked={autoFinish}
+            onChange={(e) => setAutoFinish(e.target.checked)}
+          />
         </label>
 
         <p className="muted small plan-preview">{planSummary(preview)}</p>

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { X, User, Weight, Ruler, Heart, Calendar, Watch, Cog, Activity, RefreshCw } from 'lucide-react';
+import { X, User, Barbell, Ruler, Heart, Calendar, Watch, Gear, Pulse, ArrowsClockwise } from '@phosphor-icons/react';
 import {
   loadProfile,
   saveProfile,
@@ -83,7 +83,7 @@ export function Profile({ onClose }: { onClose: () => void }) {
               onChange={(e) => update('birthDate', e.target.value || null)}
             />
           </Field>
-          <Field icon={Weight} label="Weight (kg)">
+          <Field icon={Barbell} label="Weight (kg)">
             <input
               type="number"
               inputMode="decimal"
@@ -113,7 +113,7 @@ export function Profile({ onClose }: { onClose: () => void }) {
               placeholder={maxHr ? `${maxHr} (est.)` : 'auto'}
             />
           </Field>
-          <Field icon={Activity} label="Resting HR">
+          <Field icon={Pulse} label="Resting HR">
             <input
               type="number"
               inputMode="numeric"
@@ -144,8 +144,8 @@ export function Profile({ onClose }: { onClose: () => void }) {
           </p>
         </Section>
 
-        <Section title="Settings" icon={Cog}>
-          <Field icon={Cog} label="Units">
+        <Section title="Settings" icon={Gear}>
+          <Field icon={Gear} label="Units">
             <div className="seg">
               {(['metric', 'imperial'] as Units[]).map((u) => (
                 <button
@@ -158,7 +158,7 @@ export function Profile({ onClose }: { onClose: () => void }) {
               ))}
             </div>
           </Field>
-          <Field icon={RefreshCw} label="Recalculate metrics">
+          <Field icon={ArrowsClockwise} label="Recalculate metrics">
             <button className="btn-sm" onClick={recalcMetrics} disabled={recalc != null}>
               {recalc ?? 'Run'}
             </button>

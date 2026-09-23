@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { X, Share2, Download, Image } from 'lucide-react';
+import { X, ShareNetwork, DownloadSimple, Image } from '@phosphor-icons/react';
 import { getWorkout } from '@/db/db';
 import type { Workout } from '@/model/workout';
 import { loadProfile } from '@/store/profile';
@@ -81,10 +81,10 @@ export function ShareComposer({ id, onClose }: { id: string; onClose: () => void
             </div>
 
             <button className="btn" onClick={exportPng} disabled={busy}>
-              <Share2 size={18} /> {busy ? 'Preparing…' : 'Share'}
+              <ShareNetwork size={18} /> {busy ? 'Preparing…' : 'Share'}
             </button>
             <button className="btn-ghost" onClick={exportPng} disabled={busy}>
-              <Download size={18} /> Save PNG
+              <DownloadSimple size={18} /> Save PNG
             </button>
 
             <p className="muted small center share-hint">
