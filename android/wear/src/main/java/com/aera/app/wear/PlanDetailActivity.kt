@@ -131,10 +131,8 @@ private fun fmtDistM(m: Int): String = if (m >= 1000) "%.2f km".format(m / 1000.
 @Composable
 private fun StepListScreen(plan: JSONObject, onStart: () -> Unit, onStepTap: (String) -> Unit, onAddStep: () -> Unit) {
     val steps = plan.optJSONArray("steps") ?: JSONArray()
-    val totalSteps = (0 until steps.length()).sumOf { i ->
-        val o = steps.getJSONObject(i)
-        if (o.has("repeat")) o.getJSONArray("steps").length() else 1
-    }
+    // Steps you actually run (repeat blocks expanded), same count as the phone shows.
+    val totalSteps = PlanRunner.fromJson(plan).first.size
     val listState = rememberScalingLazyListState()
     val focusRequester = remember { FocusRequester() }
     LaunchedEffect(Unit) { focusRequester.requestFocus() }

@@ -84,8 +84,7 @@ class SportMenuActivity : ComponentActivity() {
 
 private fun planLabel(plan: JSONObject): Pair<String, String?> {
     val name = plan.optString("name", "Plan")
-    val steps = plan.optJSONArray("steps")
-    val n = steps?.length() ?: 0
+    val n = PlanRunner.fromJson(plan).first.size // repeat blocks expanded, like the phone
     return name to (if (n > 0) "synced from phone · $n steps" else "synced from phone")
 }
 
