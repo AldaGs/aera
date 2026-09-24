@@ -1,5 +1,5 @@
 import { Capacitor } from '@capacitor/core';
-import { getWorkout, saveWorkout } from '@/db/db';
+import { getWorkout, listWorkouts, saveWorkout } from '@/db/db';
 import { buildWorkoutFromTrack, type RawLap } from '@/record/engine';
 import type { Sport, TrackPoint, Workout } from '@/model/workout';
 import { WearBridge } from '@/plugins/wearHr';
@@ -119,4 +119,43 @@ export async function syncWatchWorkouts(): Promise<number> {
     console.warn('syncWatchWorkouts failed:', e);
     return 0;
   }
+}
+
+const DENOISE_DONE_KEY = 'aera.watchDenoise.v1';
+
+/**
+ * One-time pass (per device): re-run denoiseTrack over watch runs imported before
+ * the filter existed, rebuilding their summary (distance, pace, splits, map) while
+ * keeping title/notes and the interval laps. Returns how many were updated.
+ */
+export async function redenoiseWatchWorkouts(): Promise<number> {
+  try {
+    if (localStorage.getItem(DENOISE_DONE_KEY)) return 0;
+  } catch {
+    return 0;
+  }
+  let n = 0;
+  try {
+    for (const meta of await listWorkouts()) {
+      if (meta.source !== 'watch') continue;
+      const w = await getWorkout(meta.id);
+      if (!w || w.track.length < 2) continue;
+      const points = denoiseTrack(w.track, w.sport);
+      const laps: RawLap[] = (w.summary.laps ?? [])
+        .filter((l) => l.label) // planned interval laps; plain km splits get re-derived
+        .map((l) => ({
+          startMs: l.startMs,
+          endMs: l.endMs,
+          kind: l.type === 'rest' ? 'recovery' : l.type === 'walk' ? 'walk' : 'run',
+          label: l.label ?? '',
+        }));
+      const rebuilt = buildWorkoutFromTrack(w.sport, Date.parse(w.startedAt), points, laps, 'watch', w.id);
+      await saveWorkout({ ...w, track: points, summary: rebuilt.summary });
+      n++;
+    }
+    localStorage.setItem(DENOISE_DONE_KEY, '1');
+  } catch (e) {
+    console.warn('redenoiseWatchWorkouts failed:', e);
+  }
+  return n;
 }

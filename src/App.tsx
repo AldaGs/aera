@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { syncWatchWorkouts } from '@/sync/workoutSync';
+import { redenoiseWatchWorkouts, syncWatchWorkouts } from '@/sync/workoutSync';
 import { TabBar, type Tab } from '@/nav/TabBar';
 import { Home } from '@/screens/Home';
 import { Record } from '@/screens/Record';
@@ -27,6 +27,7 @@ export function App() {
       if (document.visibilityState === 'visible') syncWatchWorkouts().then((n) => n > 0 && bump());
     };
     drain();
+    redenoiseWatchWorkouts().then((n) => n > 0 && bump()); // one-time cleanup of older imports
     document.addEventListener('visibilitychange', drain);
     return () => document.removeEventListener('visibilitychange', drain);
   }, []);
