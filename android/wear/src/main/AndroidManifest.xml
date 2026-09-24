@@ -45,6 +45,16 @@
             android:label="@string/quick_goal" />
 
         <activity
+            android:name=".PlanDetailActivity"
+            android:exported="false"
+            android:label="@string/plans" />
+
+        <activity
+            android:name=".StepEditActivity"
+            android:exported="false"
+            android:label="@string/plans" />
+
+        <activity
             android:name=".RecordActivity"
             android:theme="@style/Theme.Aera.Record"
             android:exported="false"

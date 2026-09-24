@@ -1,5 +1,7 @@
 package com.aera.app.wear
 
+import android.app.Activity
+import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -43,9 +45,59 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
 /**
- * Plan list (1g/2c): Free run, then synced plans, then Quick goal. Tapping a
- * plan/free-run starts it on the phone via WearCmd, falling back to a
- * standalone recording if no phone is connected.
+ * Shared "start a run" behavior (phone hand-off, falling back to a standalone watch
+ * recording): originally lived in PlansActivity, now also used from PlanDetailActivity's
+ * Start chip (F9 2c).
+ */
+object PlanActions {
+    /** Starts a plan: send the plan JSON to the phone, or record standalone if unreachable. */
+    fun startPlan(activity: Activity, plan: JSONObject) {
+        Thread {
+            val planJson = plan.toString()
+            val sent = WearCmd.send(activity, "start:$planJson")
+            activity.runOnUiThread {
+                if (sent) {
+                    ContextCompat.startForegroundService(activity, Intent(activity, HrService::class.java))
+                    activity.finish()
+                } else {
+                    startStandalone(activity, planJson, null)
+                }
+            }
+        }.start()
+    }
+
+    /** Starts an untimed free recording for [sport] ("run"/"walk"/"ride"). */
+    fun startFree(activity: Activity, sport: String) {
+        Thread {
+            // F10: free runs use the same {"free":true,"sport":...} JSON shape as plans so
+            // Record.tsx has one payload shape to parse, instead of a bare "start" special case.
+            val json = JSONObject().put("free", true).put("sport", sport).toString()
+            val sent = WearCmd.send(activity, "start:$json")
+            activity.runOnUiThread {
+                if (sent) {
+                    ContextCompat.startForegroundService(activity, Intent(activity, HrService::class.java))
+                    activity.finish()
+                } else {
+                    startStandalone(activity, null, sport)
+                }
+            }
+        }.start()
+    }
+
+    /** No phone connected: record directly on the watch via ExerciseService (Phase 4). */
+    private fun startStandalone(activity: Activity, planJson: String?, sport: String?) {
+        val intent = Intent(activity, RecordActivity::class.java)
+        intent.putExtra(RecordActivity.EXTRA_SPORT, sport ?: RecordActivity.sportOf(planJson))
+        if (planJson != null) intent.putExtra(RecordActivity.EXTRA_PLAN_JSON, planJson)
+        activity.startActivity(intent)
+        activity.finish()
+    }
+}
+
+/**
+ * Plan list (1g/2c): Free run/walk/ride, then synced plans, then Quick goal. Tapping a
+ * plan opens its step-list detail (PlanDetailActivity); tapping a free-run chip starts it
+ * on the phone via WearCmd, falling back to a standalone recording if no phone is connected.
  */
 class PlansActivity : ComponentActivity() {
 
@@ -54,50 +106,14 @@ class PlansActivity : ComponentActivity() {
         setContent {
             AeraTheme {
                 PlansScreen(
-                    onFreeRun = { startFreeRun() },
-                    onPlan = { startPlan(it) },
+                    onFree = { sport -> PlanActions.startFree(this, sport) },
+                    onPlan = { plan ->
+                        startActivity(Intent(this, PlanDetailActivity::class.java).putExtra(PlanDetailActivity.EXTRA_PLAN_JSON, plan.toString()))
+                    },
                     onQuickGoal = { startActivity(Intent(this, QuickGoalActivity::class.java)) },
                 )
             }
         }
-    }
-
-    private fun startPlan(plan: JSONObject) {
-        Thread {
-            val planJson = plan.toString()
-            val sent = WearCmd.send(this, "start:$planJson")
-            runOnUiThread {
-                if (sent) {
-                    ContextCompat.startForegroundService(this, Intent(this, HrService::class.java))
-                    finish()
-                } else {
-                    startStandalone(planJson)
-                }
-            }
-        }.start()
-    }
-
-    private fun startFreeRun() {
-        Thread {
-            val sent = WearCmd.send(this, "start")
-            runOnUiThread {
-                if (sent) {
-                    ContextCompat.startForegroundService(this, Intent(this, HrService::class.java))
-                    finish()
-                } else {
-                    startStandalone(null)
-                }
-            }
-        }.start()
-    }
-
-    /** No phone connected: record directly on the watch via ExerciseService (Phase 4). */
-    private fun startStandalone(planJson: String?) {
-        val intent = Intent(this, RecordActivity::class.java)
-        intent.putExtra(RecordActivity.EXTRA_SPORT, RecordActivity.sportOf(planJson))
-        if (planJson != null) intent.putExtra(RecordActivity.EXTRA_PLAN_JSON, planJson)
-        startActivity(intent)
-        finish()
     }
 }
 
@@ -109,7 +125,7 @@ private fun planLabel(plan: JSONObject): Pair<String, String?> {
 }
 
 @Composable
-private fun PlansScreen(onFreeRun: () -> Unit, onPlan: (JSONObject) -> Unit, onQuickGoal: () -> Unit) {
+private fun PlansScreen(onFree: (String) -> Unit, onPlan: (JSONObject) -> Unit, onQuickGoal: () -> Unit) {
     val context = LocalContext.current
     var plans by remember { mutableStateOf<List<JSONObject>>(emptyList()) }
     LaunchedEffect(Unit) {
@@ -136,7 +152,9 @@ private fun PlansScreen(onFreeRun: () -> Unit, onPlan: (JSONObject) -> Unit, onQ
                 state = listState,
                 autoCentering = androidx.wear.compose.foundation.lazy.AutoCenteringParams(itemIndex = 0),
             ) {
-                item { PlanChip(title = "Free run", subtitle = null, onClick = onFreeRun) }
+                item { PlanChip(title = "Free run", subtitle = null, onClick = { onFree("run") }) }
+                item { PlanChip(title = "Free walk", subtitle = null, onClick = { onFree("walk") }) }
+                item { PlanChip(title = "Free ride", subtitle = null, onClick = { onFree("ride") }) }
                 items(plans) { plan ->
                     val (title, subtitle) = planLabel(plan)
                     PlanChip(title = title, subtitle = subtitle, onClick = { onPlan(plan) })

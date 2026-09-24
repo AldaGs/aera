@@ -63,9 +63,28 @@ export function Record({ onRecorded }: { onRecorded: () => void }) {
             return current;
           });
         } else if (e.cmd.startsWith('start:')) {
-          // Payload is the full plan JSON: the message can beat the DataItem sync,
-          // so merge it in directly instead of waiting for the plan to arrive.
+          // Payload is either a free-run marker ({"free":true,"sport":...}, F10) or the
+          // full plan JSON (the message can beat the DataItem sync, so merge it in
+          // directly instead of waiting for the plan to arrive).
           const json = e.cmd.slice('start:'.length);
+          let free: { free: boolean; sport?: Sport } | null = null;
+          try {
+            const parsed = JSON.parse(json);
+            if (parsed && parsed.free === true && !parsed.id) free = parsed;
+          } catch {
+            // not JSON (shouldn't happen for start: payloads) — fall through to plan merge
+          }
+          if (free) {
+            setRecording((current) => {
+              if (!current) {
+                const engine = new RecordingEngine(free.sport ?? 'run');
+                engine.start();
+                return engine;
+              }
+              return current;
+            });
+            return;
+          }
           mergeIncomingPlan(json).then(async () => {
             reloadPlans();
             let planId = json;
