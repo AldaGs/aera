@@ -16,6 +16,7 @@ export interface PlanProgress {
   targetType: 'time' | 'distance' | 'either' | 'manual';
   remaining: number | null; // seconds (time) or meters (distance) left; null for manual
   remainingUnit: 'sec' | 'm' | null; // which unit `remaining` is expressed in
+  stepTarget: number | null; // the step's target in `remainingUnit` (e.g. 800 m); null for manual
   fraction: number; // 0..1 progress through the current step
   rep: number; // current work rep (1-based)
   reps: number; // total work reps
@@ -483,6 +484,7 @@ export class RecordingEngine {
       targetType: t.type,
       remaining,
       remainingUnit,
+      stepTarget: remainingUnit === 'sec' && 'sec' in t ? t.sec : remainingUnit === 'm' && 'm' in t ? t.m : null,
       fraction,
       rep,
       reps,

@@ -1,13 +1,37 @@
 import { useEffect, useRef, useState } from 'react';
 import { Pause, Play, Stop, Flag, X, GpsFix, SkipForward, Heart } from '@phosphor-icons/react';
 import type { LatLngBounds, Sport } from '@/model/workout';
+import type { StepKind } from '@/model/intervalPlan';
 import { RecordingEngine, type LiveStats, type PlanProgress } from '@/record/engine';
+import { hrZoneIndex } from '@/metrics/deriveSummary';
 import { startLocationUpdates, type LocationWatcher } from '@/record/location';
 import { fireCue } from '@/record/cues';
 import { startWatchSensors, type WatchSensors } from '@/record/hr';
 import { WearBridge } from '@/plugins/wearHr';
 import { RouteMap } from '@/ui/RouteMap';
 import { fmtDistance, fmtDuration, fmtPace, fmtSpeed } from '@/format';
+import { effectiveMaxHr, loadProfile } from '@/store/profile';
+
+// Same names as the watch (handoff 1h): Easy / Endurance / Tempo / Threshold / Max.
+const ZONE_NAMES = ['Z1 · Easy', 'Z2 · Endurance', 'Z3 · Tempo', 'Z4 · Threshold', 'Z5 · Max'];
+function hrZone(hr: number | null, maxHr: number | null): { index: number; name: string } | null {
+  if (hr == null || !maxHr) return null;
+  const index = hrZoneIndex(hr, maxHr);
+  return { index, name: ZONE_NAMES[index] };
+}
+
+const KIND_LABEL: Record<StepKind, string> = {
+  warmup: 'Warm-up',
+  walk: 'Walk',
+  run: 'Run',
+  work: 'Work',
+  recovery: 'Recovery',
+  cooldown: 'Cool-down',
+};
+
+// Finish requires a deliberate double-tap within this window (or the caller
+// can hold — the button itself absorbs a long-press via the same state).
+const FINISH_CONFIRM_MS = 3000;
 
 /**
  * Full-screen live recording view. Owns a RecordingEngine + a location stream,
@@ -34,6 +58,9 @@ export function LiveRecorder({
   const [geoError, setGeoError] = useState<string | null>(null);
   const [watchConnected, setWatchConnected] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [finishArmed, setFinishArmed] = useState(false);
+  const finishTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const maxHr = effectiveMaxHr(loadProfile());
 
   useEffect(() => {
     const engine = engineRef.current;
@@ -123,106 +150,166 @@ export function LiveRecorder({
     onCancel();
   }
 
+  function tapFinish() {
+    if (saving) return;
+    if (finishArmed) {
+      if (finishTimerRef.current) clearTimeout(finishTimerRef.current);
+      stop();
+      return;
+    }
+    setFinishArmed(true);
+    finishTimerRef.current = setTimeout(() => setFinishArmed(false), FINISH_CONFIRM_MS);
+  }
+
+  useEffect(() => () => {
+    if (finishTimerRef.current) clearTimeout(finishTimerRef.current);
+  }, []);
+
   const paused = stats?.status === 'paused';
+  const dimmed = paused && !!plan;
+  const zone = hrZone(liveHr, maxHr);
 
   return (
     <div className="overlay recorder">
-      <header className="overlay-head">
+      <header className="overlay-head recorder-topbar">
         <button className="icon-btn" onClick={cancel} aria-label="Discard">
-          <X size={24} />
+          <X size={22} />
         </button>
-        <h2>{sportName(sport)}</h2>
+        <span className="overlay-title">{sportName(sport)}</span>
         <div className="recorder-chips">
           {watchConnected && (
-            <span className="gps-chip gps-ok">
-              <Heart size={14} weight="fill" /> Watch
+            <span className="rec-chip">
+              <Heart size={12} weight="fill" /> Watch
             </span>
           )}
-          <span className={`gps-chip ${geoError ? 'gps-bad' : path.length ? 'gps-ok' : 'gps-wait'}`}>
-            <GpsFix size={14} /> {geoError ? 'No GPS' : path.length ? 'GPS' : 'Acquiring…'}
+          <span className={`rec-chip ${geoError ? 'rec-chip-bad' : ''}`}>
+            <GpsFix size={12} /> {geoError ? 'No GPS' : path.length ? 'GPS' : 'Acquiring…'}
           </span>
         </div>
       </header>
 
       <div className="recorder-body">
-        {plan && !plan.complete && <PlanBanner plan={plan} />}
+        {plan && !plan.complete ? (
+          <IntervalHero plan={plan} paused={paused} autoPaused={!!stats?.autoPaused} />
+        ) : (
+          <div className="recorder-hero">
+            <span className="recorder-hero-value">{fmtDuration(stats?.elapsedSec ?? 0)}</span>
+            {paused ? (
+              <span className="rec-pause-label">
+                {stats?.autoPaused ? 'Auto-paused · standing still' : 'Paused'}
+              </span>
+            ) : (
+              <span className="stat-label">Elapsed</span>
+            )}
+          </div>
+        )}
 
-        <div className="recorder-primary">
-          <span className="recorder-metric-value">{fmtDistance(stats?.distanceM ?? 0)}</span>
-          {stats?.autoPaused ? (
-            <span className="auto-pause-pill">Auto-paused · standing still</span>
-          ) : (
-            <span className="stat-label">Distance</span>
-          )}
-        </div>
-
-        <div className="recorder-secondary">
+        <div className={`recorder-grid ${dimmed ? 'recorder-dim' : ''}`}>
+          <Metric label="Distance" value={fmtDistance(stats?.distanceM ?? 0)} />
           <Metric label="Time" value={fmtDuration(stats?.elapsedSec ?? 0)} />
           <Metric
             label={usesPace ? 'Avg pace' : 'Avg speed'}
             value={usesPace ? fmtPace(stats?.paceSecPerKm ?? null) : fmtSpeed(stats?.speedKmh ?? null)}
           />
-          {usesPace && (
-            <Metric label="Now" value={fmtPace(stats?.currentPaceSecPerKm ?? null)} />
-          )}
-          {watchConnected && (
-            <Metric label="Heart rate" value={liveHr != null ? `${Math.round(liveHr)} bpm` : '—'} />
-          )}
-          {(stats?.lapCount ?? 1) > 1 && (
-            <Metric label="Laps" value={`${(stats?.lapCount ?? 1) - 1}`} />
-          )}
+          <div className="recorder-metric">
+            <span className="recorder-metric-sub">
+              {zone && <span className={`zone-dot zone-fill-${zone.index + 1}`} />}
+              {liveHr != null ? `${Math.round(liveHr)} bpm` : '—'}
+            </span>
+            <span className="stat-label">{zone ? zone.name : 'Heart rate'}</span>
+          </div>
         </div>
 
         <div className="recorder-map">
-          <RouteMap path={path} bounds={bounds} height={240} strokeWidth={4} showEndpoints />
+          <RouteMap path={path} bounds={bounds} height={120} strokeWidth={3} showEndpoints />
         </div>
 
         {geoError && <p className="muted small center">{geoError}</p>}
       </div>
 
       <div className="recorder-controls">
-        <button className="rec-btn rec-lap" onClick={() => engineRef.current.lap()} disabled={paused}>
-          {plan ? <SkipForward size={22} /> : <Flag size={22} />}
-          <span>{plan ? 'Next' : 'Lap'}</span>
+        <button className="rec-btn-round" onClick={() => engineRef.current.lap()} disabled={paused} aria-label={plan ? "Next step" : "Lap"}>
+          {plan ? <SkipForward size={20} /> : <Flag size={20} />}
         </button>
         {paused ? (
-          <button className="rec-btn rec-main" onClick={() => engineRef.current.resume()}>
-            <Play size={30} weight="fill" />
-            <span>Resume</span>
+          <button className="rec-btn-main" onClick={() => engineRef.current.resume()} aria-label="Resume">
+            <Play size={26} weight="fill" />
           </button>
         ) : (
-          <button className="rec-btn rec-main" onClick={() => engineRef.current.pause()}>
-            <Pause size={30} weight="fill" />
-            <span>Pause</span>
+          <button className="rec-btn-main" onClick={() => engineRef.current.pause()} aria-label="Pause">
+            <Pause size={26} weight="fill" />
           </button>
         )}
-        <button className="rec-btn rec-stop" onClick={stop} disabled={saving}>
-          <Stop size={22} weight="fill" />
-          <span>{saving ? 'Saving…' : 'Finish'}</span>
+        <button
+          className={`rec-btn-round rec-btn-finish ${finishArmed ? 'rec-btn-finish-armed' : ''}`}
+          onClick={tapFinish}
+          disabled={saving}
+          aria-label="Finish"
+        >
+          <Stop size={20} weight="fill" />
         </button>
       </div>
+      {finishArmed && !saving && <p className="muted small center rec-finish-hint">Tap again to finish</p>}
     </div>
   );
 }
 
-function PlanBanner({ plan }: { plan: PlanProgress }) {
+function IntervalHero({
+  plan,
+  paused,
+  autoPaused,
+}: {
+  plan: PlanProgress;
+  paused: boolean;
+  autoPaused: boolean;
+}) {
   const big =
     plan.targetType === 'manual'
       ? 'Tap Next'
       : plan.remainingUnit === 'm'
         ? `${Math.round(plan.remaining ?? 0)} m`
         : fmtDuration(plan.remaining ?? 0);
+  const total = plan.stepTarget;
+  const ofLabel =
+    total != null
+      ? plan.remainingUnit === 'm'
+        ? `left of ${Math.round(total)} m`
+        : `of ${fmtDuration(total)}`
+      : null;
+
+  const r = 78;
+  const c = 2 * Math.PI * r;
+  const dash = Math.max(0, Math.min(1, plan.fraction)) * c;
+
   return (
-    <div className={`plan-banner plan-banner-${plan.kind}`}>
-      <div className="plan-banner-top">
-        <span className="plan-banner-label">{plan.label}</span>
-        {plan.rep > 0 && <span className="plan-banner-rep">rep {plan.rep}/{plan.reps}</span>}
-      </div>
-      <div className="plan-banner-big">{big}</div>
-      <div className="plan-banner-bar">
-        <div className="plan-banner-fill" style={{ width: `${Math.round(plan.fraction * 100)}%` }} />
-      </div>
-      {plan.next && <div className="plan-banner-next">Next · {plan.next}</div>}
+    <div className={`recorder-hero ${paused ? 'recorder-dim' : ''}`}>
+      <svg className="interval-ring" viewBox="0 0 176 176">
+        <circle className="interval-ring-track" cx="88" cy="88" r={r} />
+        <circle
+          className="interval-ring-fill"
+          cx="88"
+          cy="88"
+          r={r}
+          strokeDasharray={`${dash} ${c}`}
+          transform="rotate(-90 88 88)"
+        />
+        <text x="88" y="70" textAnchor="middle" className="interval-ring-kind">
+          {KIND_LABEL[plan.kind].toUpperCase()} {plan.rep > 0 ? `${plan.rep} / ${plan.reps}` : ''}
+        </text>
+        <text x="88" y="102" textAnchor="middle" className="interval-ring-remaining">
+          {big}
+        </text>
+        {ofLabel && (
+          <text x="88" y="122" textAnchor="middle" className="interval-ring-of">
+            {ofLabel}
+          </text>
+        )}
+      </svg>
+      {paused ? (
+        <span className="rec-pause-label">{autoPaused ? 'Auto-paused · standing still' : 'Paused'}</span>
+      ) : (
+        plan.next && <span className="interval-next">Next · {plan.next}</span>
+      )}
     </div>
   );
 }

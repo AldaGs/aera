@@ -82,7 +82,7 @@ function gradeCostFactor(grade: number): number {
 }
 
 /** Five-zone model by percentage of max HR: Z1<60, Z2<70, Z3<80, Z4<90, Z5≥90. */
-function hrZoneIndex(hr: number, maxHr: number): number {
+export function hrZoneIndex(hr: number, maxHr: number): number {
   const pct = hr / maxHr;
   if (pct < 0.6) return 0;
   if (pct < 0.7) return 1;
