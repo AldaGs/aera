@@ -3,6 +3,7 @@ import { getWorkout, saveWorkout } from '@/db/db';
 import { buildWorkoutFromTrack, type RawLap } from '@/record/engine';
 import type { Sport, TrackPoint, Workout } from '@/model/workout';
 import { WearBridge } from '@/plugins/wearHr';
+import { denoiseTrack } from '@/metrics/denoiseTrack';
 
 /** Shape of ExerciseService.buildWorkoutJson() on the watch. */
 interface WatchWorkoutJson {
@@ -34,7 +35,7 @@ export async function importWatchWorkout(json: string): Promise<void> {
       return;
     }
     const sport: Sport = w.sport === 'walk' || w.sport === 'ride' ? w.sport : 'run';
-    const points: TrackPoint[] = w.track.map((p) => ({
+    const raw: TrackPoint[] = w.track.map((p) => ({
       t: p.t,
       lat: p.lat,
       lng: p.lng,
@@ -44,6 +45,9 @@ export async function importWatchWorkout(json: string): Promise<void> {
       speed: p.speed,
       power: p.power,
     }));
+    // Raw watch GPS: pin standing-still wobble (e.g. a warm-up in place) so it
+    // doesn't become distance on the map, splits and laps.
+    const points = denoiseTrack(raw, sport);
     const durationSec = w.summary?.durationSec ?? 0;
     if (points.length < 2 && durationSec < 10) {
       await ackWorkout(w.id); // accidental start/stop — nothing worth keeping
@@ -59,7 +63,13 @@ export async function importWatchWorkout(json: string): Promise<void> {
     );
     // No GPS (indoors, or a warm-up in place): keep the run with the watch's own
     // totals instead of dropping it — distance comes from its step-based estimate.
-    if (points.length < 2) applyWatchTotals(workout.summary, w.summary.distanceM ?? 0, durationSec, sport);
+    if (points.length < 2) {
+      applyWatchTotals(workout.summary, w.summary.distanceM ?? 0, durationSec, sport);
+    } else if ((w.summary?.distanceM ?? 0) > 0) {
+      // Trust the watch's total (Health Services fuses GPS + steps), like the
+      // Samsung import does; keep our GPS-derived moving time.
+      applyWatchDistance(workout.summary, w.summary.distanceM, sport);
+    }
     await saveWorkout(workout);
     await ackWorkout(w.id);
   } catch (e) {
@@ -79,6 +89,14 @@ function applyWatchTotals(
   const km = distanceM / 1000;
   if (sport === 'ride') s.avgSpeedKmh = durationSec > 0 ? km / (durationSec / 3600) : null;
   else s.avgPaceSecPerKm = km > 0.05 ? durationSec / km : null;
+}
+
+function applyWatchDistance(s: Workout['summary'], distanceM: number, sport: Sport): void {
+  s.distanceM = distanceM;
+  const km = distanceM / 1000;
+  const sec = s.durationMovingSec;
+  if (sport === 'ride') s.avgSpeedKmh = sec > 0 ? km / (sec / 3600) : null;
+  else s.avgPaceSecPerKm = km > 0.05 ? sec / km : null;
 }
 
 async function ackWorkout(id: string): Promise<void> {
