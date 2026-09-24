@@ -48,6 +48,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -227,7 +228,8 @@ private fun SportPickerScreen(initialIndex: Int, onSelect: (String) -> Unit) {
                                 .offset(x = (d * 68f).dp)
                                 .size(size)
                                 .alpha(if (dist < 0.5f) 1f else (1f - 0.35f * dist).coerceAtLeast(0.3f))
-                                .background(if (centered) Nocturne.accent500 else Nocturne.accent800, CircleShape)
+                                .clip(CircleShape) // round tap ripple, not a square
+                                .background(if (centered) Nocturne.accent500 else Nocturne.accent800)
                                 .clickable(enabled = centered) { onSelect(sport) },
                             contentAlignment = Alignment.Center,
                         ) {

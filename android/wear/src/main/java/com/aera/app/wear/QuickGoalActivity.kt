@@ -32,6 +32,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
@@ -188,7 +189,8 @@ private fun QuickGoalScreen(onStart: (type: String, timeSec: Int, distM: Int) ->
             Box(
                 Modifier
                     .size(52.dp)
-                    .background(Nocturne.accent500, CircleShape)
+                    .clip(CircleShape)
+                    .background(Nocturne.accent500)
                     .clickable { onStart(type, timeSec, distM) },
                 contentAlignment = Alignment.Center,
             ) {
@@ -202,7 +204,8 @@ private fun QuickGoalScreen(onStart: (type: String, timeSec: Int, distM: Int) ->
 private fun TypeSeg(label: String, selected: Boolean, onClick: () -> Unit) {
     Box(
         Modifier
-            .background(if (selected) Nocturne.accent800 else Nocturne.surface, RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(10.dp))
+            .background(if (selected) Nocturne.accent800 else Nocturne.surface)
             .clickable(onClick = onClick)
             .padding(horizontal = 8.dp, vertical = 4.dp),
     ) {

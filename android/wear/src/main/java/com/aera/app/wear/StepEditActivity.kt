@@ -32,6 +32,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
@@ -211,6 +212,7 @@ private fun StepEditScreen(kind: String, initialTarget: JSONObject, onConfirm: (
             Box(
                 Modifier
                     .size(52.dp)
+                    .clip(CircleShape)
                     .border(1.5.dp, Nocturne.accent, CircleShape)
                     .clickable {
                         val target = if (isTime) {
@@ -232,7 +234,8 @@ private fun StepEditScreen(kind: String, initialTarget: JSONObject, onConfirm: (
 private fun SegItem(label: String, selected: Boolean, onClick: () -> Unit) {
     Box(
         Modifier
-            .background(if (selected) Nocturne.accent800 else Nocturne.surface, RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(10.dp))
+            .background(if (selected) Nocturne.accent800 else Nocturne.surface)
             .clickable(onClick = onClick)
             .padding(horizontal = 10.dp, vertical = 4.dp),
     ) {

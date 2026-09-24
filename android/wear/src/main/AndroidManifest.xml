@@ -33,6 +33,7 @@
         <!-- Launch screen: Samsung-style sport picker. -->
         <activity
             android:name=".PlansActivity"
+            android:theme="@style/Theme.Aera.Record"
             android:exported="true"
             android:label="@string/app_name">
             <intent-filter>
