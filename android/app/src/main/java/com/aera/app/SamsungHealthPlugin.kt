@@ -82,10 +82,14 @@ class SamsungHealthPlugin : Plugin() {
 
     @PluginMethod
     fun readWorkouts(call: PluginCall) {
+        // Window [days ago, toDaysAgo ago). JS reads in weekly windows: one call for
+        // 90 days of full routes + HR logs built a ~37 MB string and OOM-crashed.
         val days = call.getInt("days", 90) ?: 90
+        val toDaysAgo = call.getInt("toDaysAgo", 0) ?: 0
         scope.launch {
             try {
-                val end = LocalDateTime.now()
+                val end = if (toDaysAgo == 0) LocalDateTime.now()
+                    else LocalDate.now().minusDays(toDaysAgo.toLong()).atStartOfDay() // = previous window's start
                 val start = LocalDate.now().minusDays(days.toLong()).atStartOfDay()
                 val request = DataTypes.EXERCISE.readDataRequestBuilder
                     .setLocalTimeFilter(LocalTimeFilter.of(start, end))
@@ -161,16 +165,6 @@ class SamsungHealthPlugin : Plugin() {
                         }
                         o.put("log", logArr)
 
-                        // Keep legacy heartRate array for backward compat
-                        val hr = JSArray()
-                        for (log in s.log ?: emptyList()) {
-                            val bpm = log.heartRate ?: continue
-                            val h = JSObject()
-                            h.put("timestamp", log.timestamp.toString())
-                            h.put("bpm", bpm.toDouble())
-                            hr.put(h)
-                        }
-                        o.put("heartRate", hr)
 
                         arr.put(o)
                     }

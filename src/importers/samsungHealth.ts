@@ -32,7 +32,14 @@ export async function requestSamsungAccess(): Promise<boolean> {
  * normalized Workouts, dedup, and persist.
  */
 export async function importFromSamsungHealth(days = 90): Promise<ImportResult> {
-  const { workouts: raw } = await SamsungHealth.readWorkouts({ days });
+  // Read one week at a time: a single 90-day read (full routes + HR logs) is too
+  // big for one bridge message and crashed the app with OutOfMemoryError.
+  // ponytail: a single huge week (ultra runs) could still be heavy; page per-session if so.
+  const raw: Awaited<ReturnType<typeof SamsungHealth.readWorkouts>>['workouts'] = [];
+  for (let to = 0; to < days; to += 7) {
+    const { workouts } = await SamsungHealth.readWorkouts({ days: Math.min(to + 7, days), toDaysAgo: to });
+    raw.push(...workouts);
+  }
   const existing = await importedWorkoutsByExternalId();
   const profile = loadProfile();
   const maxHr = effectiveMaxHr(profile);

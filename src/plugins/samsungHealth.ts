@@ -13,7 +13,8 @@ export interface SamsungHealthPlugin {
   /** Show Samsung's permission UI; resolves with whether READ was granted. */
   requestHealthPermissions(): Promise<{ granted: boolean }>;
   /** Read exercise sessions (with route + HR) over the last `days`. */
-  readWorkouts(options: { days: number }): Promise<{ workouts: HealthWorkout[] }>;
+  /** Workouts from `days` ago up to `toDaysAgo` ago (default now). */
+  readWorkouts(options: { days: number; toDaysAgo?: number }): Promise<{ workouts: HealthWorkout[] }>;
 }
 
 export const SamsungHealth = registerPlugin<SamsungHealthPlugin>('SamsungHealth');
