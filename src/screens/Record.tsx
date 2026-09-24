@@ -2,10 +2,10 @@ import { useEffect, useState } from 'react';
 import { SneakerMove, Bicycle, DeviceMobile, Watch, Play, Plus, PersonSimpleWalk, ArrowCounterClockwise, Repeat, Trash, PencilSimple } from '@phosphor-icons/react';
 import type { Sport } from '@/model/workout';
 import { saveWorkout, listPlans, getPlan, deletePlan } from '@/db/db';
-import type { IntervalPlan, StepTarget } from '@/model/intervalPlan';
+import type { HrZone, IntervalPlan, StepTarget } from '@/model/intervalPlan';
 import { flattenPlan, planSummary, planEstimate, fmtPlanMeta } from '@/model/intervalPlan';
 import { makeSampleWorkout } from '@/importers/sampleData';
-import { loadConnectivity, saveConnectivity } from '@/store/profile';
+import { effectiveMaxHr, loadConnectivity, loadProfile, saveConnectivity } from '@/store/profile';
 import { LiveRecorder } from '@/screens/LiveRecorder';
 import { IntervalBuilder } from '@/screens/IntervalBuilder';
 import { RecordingEngine, hasResumableRecording } from '@/record/engine';
@@ -39,6 +39,7 @@ export function Record({ onRecorded }: { onRecorded: () => void }) {
   const [goalType, setGoalType] = useState<'none' | 'time' | 'distance' | 'either'>('none');
   const [goalSec, setGoalSec] = useState(1800);
   const [goalKm, setGoalKm] = useState(5);
+  const [hrZone, setHrZone] = useState<HrZone | null>(null);
   const [startSheetOpen, setStartSheetOpen] = useState(false);
   const conn = loadConnectivity();
   const canSync = samsungAvailable();
@@ -136,28 +137,29 @@ export function Record({ onRecorded }: { onRecorded: () => void }) {
     listPlans().then(setPlans);
   }
 
-  /** The plan implied by the current goal tags — null means a plain free run. */
+  /** The plan implied by the current goal tags and/or HR zone — null means a plain free run. */
   function buildQuickPlan(): IntervalPlan | null {
     const needSec = goalType === 'time' || goalType === 'either';
     const needDist = goalType === 'distance' || goalType === 'either';
     // A zero goal would be met on the first tick and end the run instantly.
-    if (goalType === 'none' || (needSec && goalSec <= 0) || (needDist && goalKm <= 0)) {
-      return null;
-    }
-    const target: StepTarget =
-      goalType === 'time'
+    const hasGoal = !(goalType === 'none' || (needSec && goalSec <= 0) || (needDist && goalKm <= 0));
+    if (!hasGoal && !hrZone) return null; // plain free run, no goal, no zone target
+    const target: StepTarget = hasGoal
+      ? goalType === 'time'
         ? { type: 'time', sec: goalSec }
         : goalType === 'distance'
           ? { type: 'distance', m: Math.round(goalKm * 1000) }
-          : { type: 'either', sec: goalSec, m: Math.round(goalKm * 1000) };
+          : { type: 'either', sec: goalSec, m: Math.round(goalKm * 1000) }
+      : { type: 'manual' }; // zone-only free run: never auto-advances
     // kind 'work' stays neutral here — quick goal applies to any sport (run/walk/ride),
     // and 'work' already drives the same cue/CSS treatment as before.
     return {
       id: '',
       name: 'Quick goal',
       sport,
-      steps: [{ id: crypto.randomUUID(), kind: 'work', target }],
-      autoFinish: true,
+      steps: [{ id: crypto.randomUUID(), kind: 'work', target, hrZone: hrZone ?? undefined }],
+      autoFinish: hasGoal,
+      hrZone: hrZone ?? undefined,
       createdAt: new Date().toISOString(),
     };
   }
@@ -172,7 +174,10 @@ export function Record({ onRecorded }: { onRecorded: () => void }) {
    * of starting local GPS/RecordingEngine. Returns whether the watch accepted it. */
   async function startOnWatch(plan: IntervalPlan | null): Promise<boolean> {
     const p = plan ?? buildQuickPlan();
-    const json = p ? JSON.stringify({ ...p, id: p.id || crypto.randomUUID() }) : undefined;
+    // Watch standalone recording has no phone profile to read max HR from — include it
+    // in the plan payload (falls back to Zones.DEFAULT_MAX_HR on the watch when absent).
+    const maxHr = effectiveMaxHr(loadProfile());
+    const json = p ? JSON.stringify({ ...p, id: p.id || crypto.randomUUID(), maxHr }) : undefined;
     try {
       const res = await WearBridge.startOnWatch({ sport: p?.sport ?? sport, json });
       return res.sent;
@@ -402,6 +407,8 @@ export function Record({ onRecorded }: { onRecorded: () => void }) {
           onGoalTypeChange={setGoalType}
           onGoalSecChange={setGoalSec}
           onGoalKmChange={setGoalKm}
+          hrZone={hrZone}
+          onHrZoneChange={setHrZone}
           plans={plans}
           onClose={() => setStartSheetOpen(false)}
           onStart={() => {

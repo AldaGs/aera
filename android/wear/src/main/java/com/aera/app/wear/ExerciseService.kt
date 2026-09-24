@@ -59,6 +59,8 @@ class ExerciseService : Service() {
 
     private var runner: PlanRunner? = null
     private var sport: String = "run"
+    private var maxHr: Int = Zones.DEFAULT_MAX_HR
+    private val zoneGuard = ZoneGuard()
     private var workoutId: String = ""
     private var startedAtMs: Long = 0L
     private var distanceM: Double = 0.0
@@ -105,18 +107,21 @@ class ExerciseService : Service() {
         val planJson = intent.getStringExtra(EXTRA_PLAN_JSON)
         if (planJson != null) {
             try {
-                val (steps, autoFinish) = PlanRunner.fromJson(JSONObject(planJson))
+                val (steps, autoFinish, jsonMaxHr) = PlanRunner.fromJson(JSONObject(planJson))
+                if (jsonMaxHr != null && jsonMaxHr > 0) maxHr = jsonMaxHr
                 if (steps.isNotEmpty()) {
                     runner = PlanRunner(steps, autoFinish)
                     lapMeta.add(steps[0].kind to steps[0].label)
                     RecState.stepLabel = steps[0].label
                     RecState.stepKind = steps[0].kind
                     RecState.stepTotal = steps.size
+                    RecState.targetZone = steps[0].hrZone ?: 0
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "bad plan json: ${e.message}")
             }
         }
+        RecState.maxHr = maxHr
         workoutId = UUID.randomUUID().toString()
         startedAtMs = System.currentTimeMillis()
         RecState.running = true
@@ -228,6 +233,13 @@ class ExerciseService : Service() {
         RecState.hr = lastHr
         RecState.autoPaused = state == ExerciseState.AUTO_PAUSED
         RecState.paused = state.isPaused
+
+        val targetZone = (runner?.currentStep?.hrZone ?: 0).takeIf { it > 0 }
+        RecState.targetZone = targetZone ?: 0
+        val zGuardPaused = state.isPaused || state == ExerciseState.AUTO_PAUSED
+        val zEvent = zoneGuard.sample(activeMs, lastHr, targetZone, maxHr, zGuardPaused)
+        RecState.zoneStatus = zoneGuard.status.name.lowercase()
+        if (zEvent != null) vibrateZone(zEvent)
         // speed m/s -> pace sec/km; 0/negative/absent speed (stopped or unsupported) reports no pace.
         RecState.paceSecPerKm = if (speed != null && speed > 0.3) (1000.0 / speed).toInt() else 0
 
@@ -254,6 +266,7 @@ class ExerciseService : Service() {
         lapStartsMs.add(activeMs)
         if (!r.complete) lapMeta.add(r.currentStep.kind to r.currentStep.label)
         closeLap(activeMs, distanceM, trigger = endedStepLabel)
+        zoneGuard.reset() // new step (or plan end) → target changed, timers restart
         vibrate(if (r.complete) "done" else r.currentStep.kind)
         if (r.complete && r.autoFinish) {
             exerciseClient.endExerciseAsync()
@@ -455,6 +468,18 @@ class ExerciseService : Service() {
         }
     }
 
+    /** Zone-guard alert: high = 2 short (slow down), low = 1 long (speed up),
+     * back = 1 very short tick. Matches PhoneListener's watch-side patterns. */
+    private fun vibrateZone(event: ZoneEvent) {
+        vibrate(
+            when (event) {
+                ZoneEvent.HIGH -> "zone-high"
+                ZoneEvent.LOW -> "zone-low"
+                ZoneEvent.BACK -> "zone-back"
+            },
+        )
+    }
+
     private fun vibrate(kind: String) {
         val v = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             (getSystemService(VIBRATOR_MANAGER_SERVICE) as? VibratorManager)?.defaultVibrator
@@ -466,6 +491,9 @@ class ExerciseService : Service() {
             "recovery", "walk" -> longArrayOf(0, 120)
             "done" -> longArrayOf(0, 400)
             "lap" -> longArrayOf(0, 60, 60, 60)
+            "zone-high" -> longArrayOf(0, 150, 120, 150) // slow down: 2 short
+            "zone-low" -> longArrayOf(0, 500) // speed up: 1 long
+            "zone-back" -> longArrayOf(0, 40) // back in zone: 1 very short tick
             else -> longArrayOf(0, 180)
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

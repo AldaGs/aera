@@ -1,9 +1,11 @@
 import type { Lap, Sport, TrackPoint, Workout, WorkoutSource } from '@/model/workout';
-import type { PlanStep, StepKind } from '@/model/intervalPlan';
+import type { HrZone, PlanStep, StepKind } from '@/model/intervalPlan';
 import { deriveSummary, haversine } from '@/metrics/deriveSummary';
 import { saveWorkout } from '@/db/db';
 import { effectiveMaxHr, loadProfile } from '@/store/profile';
 import type { LocationSample } from './location';
+import { ZoneGuard, type ZoneStatus } from './zoneGuard';
+import type { CueKind } from './cues';
 
 export type RecStatus = 'idle' | 'recording' | 'paused';
 
@@ -37,6 +39,8 @@ export interface LiveStats {
   autoPaused: boolean; // GPS says you've stopped moving
   plan?: PlanProgress; // present while a structured plan is running
   liveHr: number | null; // latest HR independent of GPS movement
+  targetHrZone: HrZone | null; // active zone target (step's, plan's, or free-run), if any
+  hrZoneStatus: ZoneStatus; // 'in' | 'high' | 'low' | 'none', for UI coloring
 }
 
 const RESUME_KEY = 'aera.activeRecording';
@@ -134,6 +138,7 @@ interface Persisted {
   stepStartDist?: number;
   lapMeta?: LapMeta[];
   planComplete?: boolean;
+  freeRunHrZone?: HrZone | null;
 }
 
 /**
@@ -168,11 +173,17 @@ export class RecordingEngine {
   private stepStartDist = 0;
   private lapMeta: LapMeta[] = []; // one per lapStartsMs boundary
   private planComplete = false;
-  /** Fired on each step transition (entering `kind`, or 'done' at plan end). */
-  onCue: ((kind: StepKind | 'done') => void) | null = null;
+  /** Fired on each step transition (entering `kind`, 'done' at plan end, or a
+   * zone-guard event). */
+  onCue: ((kind: CueKind) => void) | null = null;
+  /** HR zone target for a free run (no plan); ignored while a plan step has its own. */
+  freeRunHrZone: HrZone | null = null;
+  private zoneGuard = new ZoneGuard();
+  private maxHr: number | null;
 
   constructor(sport: Sport) {
     this.sport = sport;
+    this.maxHr = effectiveMaxHr(loadProfile());
   }
 
   /** Attach a structured interval plan; call before start(). */
@@ -186,6 +197,22 @@ export class RecordingEngine {
     this.lapMeta = this.plan
       ? [{ kind: this.plan[0].kind, label: this.plan[0].label }]
       : [];
+    this.zoneGuard.reset();
+  }
+
+  /** The zone the current step (or free run) targets, if any. */
+  private activeHrZone(): HrZone | null {
+    if (this.plan && !this.planComplete) return this.plan[this.stepIndex].hrZone ?? null;
+    return this.freeRunHrZone;
+  }
+
+  /** Sample the zone guard with the current HR and fire onCue for any resulting event. */
+  private checkZoneGuard(): void {
+    const hr = this.hrProvider?.() ?? null;
+    const targetZone = this.activeHrZone();
+    const paused = this.status !== 'recording' || this.autoPaused;
+    const event = this.zoneGuard.sample(Date.now(), hr, targetZone, this.maxHr, paused);
+    if (event) this.onCue?.(`zone-${event}` as CueKind);
   }
 
   subscribe(fn: (s: LiveStats) => void): () => void {
@@ -310,6 +337,7 @@ export class RecordingEngine {
     this.stepIndex = nextIdx;
     this.stepStartMs = now;
     this.stepStartDist = this.distanceM;
+    this.zoneGuard.reset();
     this.onCue?.(next.kind);
     this.emit();
   }
@@ -366,6 +394,7 @@ export class RecordingEngine {
       this.autoPauseStartedMs = Date.now();
     }
     this.checkPlanAdvance();
+    this.checkZoneGuard();
     this.emit();
   }
 
@@ -509,6 +538,8 @@ export class RecordingEngine {
       autoPaused: this.status === 'recording' && this.autoPaused,
       plan: this.planProgress(),
       liveHr: this.hrProvider?.() ?? null,
+      targetHrZone: this.activeHrZone(),
+      hrZoneStatus: this.zoneGuard.getStatus(),
     };
   }
 
@@ -560,6 +591,7 @@ export class RecordingEngine {
       stepStartDist: this.stepStartDist,
       lapMeta: this.lapMeta,
       planComplete: this.planComplete,
+      freeRunHrZone: this.freeRunHrZone,
     };
     try {
       localStorage.setItem(RESUME_KEY, JSON.stringify(data));
@@ -595,6 +627,7 @@ export class RecordingEngine {
       e.stepStartDist = d.stepStartDist ?? 0;
       e.lapMeta = d.lapMeta ?? [];
       e.planComplete = d.planComplete ?? false;
+      e.freeRunHrZone = d.freeRunHrZone ?? null;
       for (let i = 1; i < e.points.length; i++) {
         e.distanceM += haversine(
           e.points[i - 1].lat,

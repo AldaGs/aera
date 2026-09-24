@@ -117,6 +117,8 @@ private fun MainScreen(onToggle: () -> Unit, onPlans: () -> Unit) {
     var remaining by remember { mutableIntStateOf(0) }
     var measuring by remember { mutableStateOf(false) }
     var lastVibratedSec by remember { mutableIntStateOf(-1) }
+    var targetZone by remember { mutableIntStateOf(0) }
+    var maxHr by remember { mutableIntStateOf(Zones.DEFAULT_MAX_HR) }
 
     LaunchedEffect(Unit) {
         while (true) {
@@ -124,6 +126,8 @@ private fun MainScreen(onToggle: () -> Unit, onPlans: () -> Unit) {
             stepLabel = AeraState.stepLabel
             remaining = AeraState.remainingNow()
             measuring = AeraState.measuring
+            targetZone = AeraState.targetZone
+            maxHr = AeraState.maxHr
             if (remaining in 1..5 && remaining != lastVibratedSec) {
                 lastVibratedSec = remaining
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -142,10 +146,23 @@ private fun MainScreen(onToggle: () -> Unit, onPlans: () -> Unit) {
                 Text(stepLabel, color = Nocturne.accent400, fontSize = 14.sp, fontWeight = FontWeight.Medium)
                 Spacer(Modifier.height(2.dp))
             }
+            // Tint the HR number by zone status, same as the phone's LiveRecorder: in-zone
+            // accent, above target amber ("attention"), below target neutral.
+            val hrColor = if (hr > 0 && targetZone > 0) {
+                val idx = Zones.index(hr, maxHr) + 1
+                when {
+                    idx == targetZone -> Nocturne.accent300
+                    idx > targetZone -> Nocturne.attention
+                    else -> Nocturne.neutral400
+                }
+            } else Nocturne.text
             Row(verticalAlignment = Alignment.Bottom) {
-                Text(if (hr > 0) "$hr" else "--", color = Nocturne.text, fontSize = 56.sp, fontWeight = FontWeight.Medium)
+                Text(if (hr > 0) "$hr" else "--", color = hrColor, fontSize = 56.sp, fontWeight = FontWeight.Medium)
                 Spacer(Modifier.width(4.dp))
                 Text("bpm", color = Nocturne.neutral500, fontSize = 14.sp, modifier = Modifier.padding(bottom = 10.dp))
+            }
+            if (targetZone > 0) {
+                Text("Target Z$targetZone", color = Nocturne.neutral500, fontSize = 11.sp)
             }
             if (stepLabel.isNotEmpty() && remaining > 0) {
                 Text("${remaining}s", color = Nocturne.accent300, fontSize = 16.sp, fontWeight = FontWeight.Medium)

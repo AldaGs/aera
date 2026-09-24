@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Pause, Play, Stop, Flag, X, GpsFix, SkipForward, Heart } from '@phosphor-icons/react';
 import type { LatLngBounds, Sport } from '@/model/workout';
-import type { StepKind } from '@/model/intervalPlan';
+import type { HrZone, StepKind } from '@/model/intervalPlan';
 import { RecordingEngine, type LiveStats, type PlanProgress } from '@/record/engine';
 import { hrZoneIndex } from '@/metrics/deriveSummary';
 import { startLocationUpdates, type LocationWatcher } from '@/record/location';
@@ -19,6 +19,15 @@ function hrZone(hr: number | null, maxHr: number | null): { index: number; name:
   if (hr == null || !maxHr) return null;
   const index = hrZoneIndex(hr, maxHr);
   return { index, name: ZONE_NAMES[index] };
+}
+
+const ZONE_BOUNDS: Record<HrZone, [number, number]> = { 1: [0, 0.6], 2: [0.6, 0.7], 3: [0.7, 0.8], 4: [0.8, 0.9], 5: [0.9, 1.1] };
+function targetZoneLabel(z: HrZone, maxHr: number | null): string {
+  if (!maxHr) return `Target Z${z}`;
+  const [lo, hi] = ZONE_BOUNDS[z];
+  const loBpm = Math.round(maxHr * lo);
+  const hiBpm = z === 5 ? Math.round(maxHr) : Math.round(maxHr * hi);
+  return `Target Z${z} · ${loBpm}–${hiBpm}`;
 }
 
 const KIND_LABEL: Record<StepKind, string> = {
@@ -62,10 +71,19 @@ export function LiveRecorder({
   const [finishArmed, setFinishArmed] = useState(false);
   const finishTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const maxHr = effectiveMaxHr(loadProfile());
+  const [zoneBanner, setZoneBanner] = useState<'high' | 'low' | null>(null);
+  const zoneBannerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     const engine = engineRef.current;
-    engine.onCue = (kind) => void fireCue(kind);
+    engine.onCue = (kind) => {
+      void fireCue(kind);
+      if (kind === 'zone-high' || kind === 'zone-low') {
+        setZoneBanner(kind === 'zone-high' ? 'high' : 'low');
+        if (zoneBannerTimerRef.current) clearTimeout(zoneBannerTimerRef.current);
+        zoneBannerTimerRef.current = setTimeout(() => setZoneBanner(null), 3000);
+      }
+    };
     const unsub = engine.subscribe(setStats);
     if (engine.status === 'idle') engine.start();
 
@@ -124,6 +142,8 @@ export function LiveRecorder({
         label: p.label,
         kind: p.kind,
         remainingSec: Math.round(p.remaining ?? 0),
+        targetZone: targetHrZone ?? 0,
+        maxHr: maxHr ?? 0,
       }).catch(() => {});
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -133,6 +153,8 @@ export function LiveRecorder({
   const plan = stats?.plan;
   const points = stats?.points ?? [];
   const liveHr = stats?.liveHr ?? null;
+  const targetHrZone = stats?.targetHrZone ?? null;
+  const hrZoneStatus = stats?.hrZoneStatus ?? 'none';
   const path = points.map((p) => [p.lat, p.lng] as [number, number]);
   const bounds = boundsOf(path);
 
@@ -184,6 +206,7 @@ export function LiveRecorder({
 
   useEffect(() => () => {
     if (finishTimerRef.current) clearTimeout(finishTimerRef.current);
+    if (zoneBannerTimerRef.current) clearTimeout(zoneBannerTimerRef.current);
   }, []);
 
   const paused = stats?.status === 'paused';
@@ -232,14 +255,19 @@ export function LiveRecorder({
             label={usesPace ? 'Avg pace' : 'Avg speed'}
             value={usesPace ? fmtPace(stats?.paceSecPerKm ?? null) : fmtSpeed(stats?.speedKmh ?? null)}
           />
-          <div className="recorder-metric">
+          <div className={`recorder-metric hr-status-${hrZoneStatus}`}>
             <span className="recorder-metric-sub">
               {zone && <span className={`zone-dot zone-fill-${zone.index + 1}`} />}
               {liveHr != null ? `${Math.round(liveHr)} bpm` : '—'}
             </span>
             <span className="stat-label">{zone ? zone.name : 'Heart rate'}</span>
+            {targetHrZone && <span className="muted small hr-target-line">{targetZoneLabel(targetHrZone, maxHr)}</span>}
           </div>
         </div>
+
+        {zoneBanner && (
+          <p className={`zone-banner zone-banner-${zoneBanner}`}>{zoneBanner === 'high' ? 'Slow down' : 'Speed up'}</p>
+        )}
 
         <div className="recorder-map">
           <RouteMap path={path} bounds={bounds} height={120} strokeWidth={3} showEndpoints />

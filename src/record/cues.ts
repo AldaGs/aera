@@ -3,8 +3,9 @@ import { Haptics, ImpactStyle, NotificationType } from '@capacitor/haptics';
 import { WearBridge } from '@/plugins/wearHr';
 import type { StepKind } from '@/model/intervalPlan';
 
-/** A transition cue kind — the step you're entering, or 'done' at plan end. */
-export type CueKind = StepKind | 'done';
+/** A transition cue kind — the step you're entering, 'done' at plan end, or an HR
+ * zone-guard event (see src/record/zoneGuard.ts). */
+export type CueKind = StepKind | 'done' | 'zone-high' | 'zone-low' | 'zone-back';
 
 /**
  * Fire a transition cue. Phone haptics via @capacitor/haptics, with a distinct
@@ -38,6 +39,20 @@ export async function fireCue(kind: CueKind): Promise<void> {
       case 'done':
         // Finished — long success notification.
         await Haptics.notification({ type: NotificationType.Success });
+        break;
+      case 'zone-high':
+        // Slow down — two short heavy taps.
+        await Haptics.impact({ style: ImpactStyle.Heavy });
+        await delay(100);
+        await Haptics.impact({ style: ImpactStyle.Heavy });
+        break;
+      case 'zone-low':
+        // Speed up — one long buzz.
+        await Haptics.vibrate({ duration: 400 });
+        break;
+      case 'zone-back':
+        // Back in zone — one very short tick.
+        await Haptics.impact({ style: ImpactStyle.Light });
         break;
     }
   } catch {

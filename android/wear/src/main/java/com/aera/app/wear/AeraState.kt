@@ -13,12 +13,18 @@ object AeraState {
     @Volatile var stepKind: String = ""
     @Volatile private var stepRemainingSec: Int = 0
     @Volatile private var stepReceivedAt: Long = 0L
+    /** Mirror-mode HR zone target: the phone stamps these onto /aera/step so this
+     * screen can tint the HR readout the same way LiveRecorder does. 0 = no target. */
+    @Volatile var targetZone: Int = 0
+    @Volatile var maxHr: Int = Zones.DEFAULT_MAX_HR
 
-    fun setStep(label: String, kind: String, remainingSec: Int) {
+    fun setStep(label: String, kind: String, remainingSec: Int, zone: Int = 0, maxHrArg: Int = 0) {
         stepLabel = label
         stepKind = kind
         stepRemainingSec = remainingSec
         stepReceivedAt = System.currentTimeMillis()
+        targetZone = zone
+        if (maxHrArg > 0) maxHr = maxHrArg
     }
 
     fun clearStep() {
@@ -26,6 +32,7 @@ object AeraState {
         stepKind = ""
         stepRemainingSec = 0
         stepReceivedAt = 0L
+        targetZone = 0
     }
 
     /** Seconds left in the current step, counted down since it was received. */

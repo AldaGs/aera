@@ -2,12 +2,24 @@ import { useEffect, useState } from 'react';
 import { X, Play, Watch, DeviceMobile } from '@phosphor-icons/react';
 import { Capacitor } from '@capacitor/core';
 import type { Sport } from '@/model/workout';
-import type { IntervalPlan } from '@/model/intervalPlan';
+import type { HrZone, IntervalPlan } from '@/model/intervalPlan';
 import { planSummary, planEstimate, fmtPlanMeta } from '@/model/intervalPlan';
 import { WearBridge } from '@/plugins/wearHr';
 import { startLocationUpdates, type LocationWatcher } from '@/record/location';
 import { syncPlans, getLastSyncAt } from '@/sync/planSync';
 import { fmtSec, parseSec } from '@/screens/IntervalBuilder';
+import { effectiveMaxHr, loadProfile } from '@/store/profile';
+
+const ZONE_NAMES: Record<HrZone, string> = { 1: 'Easy', 2: 'Endurance', 3: 'Tempo', 4: 'Threshold', 5: 'Max' };
+// Same 5-zone % bands as hrZoneIndex (src/metrics/deriveSummary.ts): <60/<70/<80/<90/>=90% of max HR.
+const ZONE_BOUNDS: Record<HrZone, [number, number]> = { 1: [0, 0.6], 2: [0.6, 0.7], 3: [0.7, 0.8], 4: [0.8, 0.9], 5: [0.9, 1.1] };
+function zoneBpmLabel(z: HrZone, maxHr: number | null): string {
+  if (!maxHr) return `Z${z} · ${ZONE_NAMES[z]}`;
+  const [lo, hi] = ZONE_BOUNDS[z];
+  const loBpm = Math.round(maxHr * lo);
+  const hiBpm = z === 5 ? Math.round(maxHr) : Math.round(maxHr * hi);
+  return `Z${z} · ${ZONE_NAMES[z]} · ${loBpm}–${hiBpm} bpm`;
+}
 
 type GoalType = 'none' | 'time' | 'distance' | 'either';
 
@@ -41,6 +53,8 @@ export function StartSheet({
   onGoalTypeChange,
   onGoalSecChange,
   onGoalKmChange,
+  hrZone,
+  onHrZoneChange,
   plans,
   onClose,
   onStart,
@@ -54,6 +68,8 @@ export function StartSheet({
   onGoalTypeChange: (t: GoalType) => void;
   onGoalSecChange: (sec: number) => void;
   onGoalKmChange: (km: number) => void;
+  hrZone: HrZone | null;
+  onHrZoneChange: (z: HrZone | null) => void;
   plans: IntervalPlan[];
   onClose: () => void;
   onStart: () => void;
@@ -221,6 +237,32 @@ export function StartSheet({
             Plan…
           </button>
         </div>
+      </div>
+
+      <div className="start-goal-block">
+        <span className="start-goal-label">Heart rate zone</span>
+        {selectedPlan ? (
+          <span className="muted small">
+            {selectedPlan.hrZone
+              ? zoneBpmLabel(selectedPlan.hrZone, effectiveMaxHr(loadProfile()))
+              : 'No zone target set on this plan'}
+          </span>
+        ) : (
+          <div className="start-tag-row">
+            <button className={`tag ${hrZone == null ? 'tag-accent' : 'tag-neutral'}`} onClick={() => onHrZoneChange(null)}>
+              Off
+            </button>
+            {([1, 2, 3, 4, 5] as HrZone[]).map((z) => (
+              <button
+                key={z}
+                className={`tag ${hrZone === z ? 'tag-accent' : 'tag-neutral'}`}
+                onClick={() => onHrZoneChange(z)}
+              >
+                {zoneBpmLabel(z, effectiveMaxHr(loadProfile()))}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="start-record-on">

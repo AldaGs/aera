@@ -49,6 +49,8 @@
   /* Semantic (not zones): positive = goal met/success, info = neutral notices. */
   --color-positive: var(--color-accent-300);
   --color-info: var(--color-neutral-400);
+  /* HR zone-guard: high = desaturated amber (attention, not alarm); low = neutral. */
+  --color-attention: #c9a26b;
 
   --space-1: 2.8px;
   --space-2: 5.6px;
@@ -1475,6 +1477,20 @@ body {
   border-radius: 999px;
   flex: none;
 }
+.hr-status-high .recorder-metric-sub { color: var(--color-attention); }
+.hr-status-low .recorder-metric-sub { color: var(--color-neutral-400); }
+.hr-status-in .recorder-metric-sub { color: var(--color-accent-300); }
+.hr-target-line { margin-top: 1px; }
+.zone-banner {
+  text-align: center;
+  font-weight: 600;
+  font-size: 14px;
+  padding: 6px 0;
+  margin: -4px 0 10px;
+  border-radius: var(--radius-md);
+}
+.zone-banner-high { color: var(--color-attention); background: color-mix(in srgb, var(--color-attention) 16%, transparent); }
+.zone-banner-low { color: var(--color-neutral-300); background: color-mix(in srgb, var(--color-neutral-400) 14%, transparent); }
 .recorder-map {
   border-radius: var(--radius-md);
   overflow: hidden;
@@ -1847,6 +1863,13 @@ body {
   font-size: 17px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.builder-step-zone {
+  font-size: 10px;
+  padding: 1px 6px;
 }
 .builder-step-handle {
   color: var(--color-neutral-600);

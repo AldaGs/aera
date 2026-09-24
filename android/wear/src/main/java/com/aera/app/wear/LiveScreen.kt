@@ -68,8 +68,23 @@ data class LiveData(
     val stepTargetM: Int,
     val nextStepLabel: String,
     val gpsSource: String = "watch",
+    val targetZone: Int = 0, // 1..5, 0 = no target
+    val maxHr: Int = Zones.DEFAULT_MAX_HR,
 ) {
     val hasStep: Boolean get() = stepTotal > 0
+
+    /** Tint for the HR readout: in-zone accent, above target amber, below target neutral,
+     * default text color with no target set. Mirrors LiveRecorder's hr-status-* CSS. */
+    val hrColor: Color
+        @Composable get() {
+            if (hr <= 0 || targetZone <= 0) return Nocturne.text
+            val idx = Zones.index(hr, maxHr) + 1
+            return when {
+                idx == targetZone -> Nocturne.accent300
+                idx > targetZone -> Nocturne.attention
+                else -> Nocturne.neutral400
+            }
+        }
 
     companion object {
         fun from(s: RecState) = LiveData(
@@ -88,6 +103,8 @@ data class LiveData(
             stepRemainingM = s.stepRemainingM,
             stepTargetM = s.stepTargetM,
             nextStepLabel = s.nextStepLabel,
+            targetZone = s.targetZone,
+            maxHr = s.maxHr,
         )
     }
 }
@@ -191,7 +208,7 @@ private fun ZoneArcLayout(data: LiveData) {
         Canvas(Modifier.size(280.dp)) {
             val r = size.minDimension / 2f * (128f / 140f)
             val center = Offset(size.width / 2f, size.height / 2f)
-            val zoneIdx = Zones.index(data.hr)
+            val zoneIdx = Zones.index(data.hr, data.maxHr)
             val segSweep = 44f
             val gap = 5f
             for (i in 0 until 5) {
@@ -206,9 +223,21 @@ private fun ZoneArcLayout(data: LiveData) {
                     size = Size(r * 2, r * 2),
                     style = Stroke(width = if (active) 9.dp.toPx() else 7.dp.toPx(), cap = StrokeCap.Butt),
                 )
+                // Target zone: an outline ring on top of its segment, distinct from "active".
+                if (data.targetZone == i + 1) {
+                    drawArc(
+                        color = Nocturne.text,
+                        startAngle = start,
+                        sweepAngle = segSweep,
+                        useCenter = false,
+                        topLeft = Offset(center.x - r, center.y - r),
+                        size = Size(r * 2, r * 2),
+                        style = Stroke(width = 1.5.dp.toPx(), cap = StrokeCap.Butt),
+                    )
+                }
             }
             // Marker dot at current HR position.
-            val angleDeg = Zones.markerAngleDeg(data.hr)
+            val angleDeg = Zones.markerAngleDeg(data.hr, data.maxHr)
             val angleRad = Math.toRadians(angleDeg.toDouble())
             val mx = center.x + r * cos(angleRad).toFloat()
             val my = center.y + r * sin(angleRad).toFloat()
@@ -221,11 +250,14 @@ private fun ZoneArcLayout(data: LiveData) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 HeartIcon(Nocturne.accent400, 16.dp)
                 Spacer(Modifier.width(4.dp))
-                Text(if (data.hr > 0) "${data.hr}" else "--", color = Nocturne.text, fontSize = 68.sp, fontWeight = FontWeight.Normal)
+                Text(if (data.hr > 0) "${data.hr}" else "--", color = data.hrColor, fontSize = 68.sp, fontWeight = FontWeight.Normal)
             }
             Spacer(Modifier.height(2.dp))
-            val zoneIdx = Zones.index(data.hr)
+            val zoneIdx = Zones.index(data.hr, data.maxHr)
             Text("Z${zoneIdx + 1} · ${Zones.names[zoneIdx]}", color = Nocturne.accent300, fontSize = 13.sp)
+            if (data.targetZone > 0) {
+                Text("Target Z${data.targetZone}", color = Nocturne.neutral500, fontSize = 11.sp)
+            }
             Spacer(Modifier.height(10.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(22.dp)) {
                 MiniMetric(fmtPace(data.paceSecPerKm), "")
@@ -274,8 +306,11 @@ private fun MetricStackLayout(data: LiveData) {
         Spacer(Modifier.height(10.dp))
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             HeartIcon(Nocturne.accent400, 18.dp)
-            Text(if (data.hr > 0) "${data.hr}" else "--", color = Nocturne.text, fontSize = 30.sp)
-            ZoneMeter(Zones.index(data.hr))
+            Text(if (data.hr > 0) "${data.hr}" else "--", color = data.hrColor, fontSize = 30.sp)
+            ZoneMeter(Zones.index(data.hr, data.maxHr))
+        }
+        if (data.targetZone > 0) {
+            Text("Target Z${data.targetZone}", color = Nocturne.neutral500, fontSize = 10.sp)
         }
         Spacer(Modifier.height(14.dp))
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
@@ -358,7 +393,7 @@ private fun IntervalLayout(data: LiveData) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     HeartIcon(Nocturne.accent400, 13.dp)
                     Spacer(Modifier.width(3.dp))
-                    Text(if (data.hr > 0) "${data.hr}" else "--", color = Nocturne.text, fontSize = 15.sp)
+                    Text(if (data.hr > 0) "${data.hr}" else "--", color = data.hrColor, fontSize = 15.sp)
                 }
             }
             Spacer(Modifier.height(10.dp))

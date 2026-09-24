@@ -126,6 +126,8 @@ class WearBridgePlugin : Plugin() {
             .put("label", call.getString("label") ?: "")
             .put("kind", call.getString("kind") ?: "")
             .put("remainingSec", call.getInt("remainingSec", 0) ?: 0)
+            .put("targetZone", call.getInt("targetZone", 0) ?: 0)
+            .put("maxHr", call.getInt("maxHr", 0) ?: 0)
         send("/aera/step", json.toString().toByteArray())
         call.resolve()
     }

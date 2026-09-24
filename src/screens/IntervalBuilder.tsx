@@ -11,7 +11,7 @@ import {
   Check,
 } from '@phosphor-icons/react';
 import { savePlan } from '@/db/db';
-import type { IntervalPlan, PlanStepDef, RepeatBlock, StepKind, StepTarget } from '@/model/intervalPlan';
+import type { HrZone, IntervalPlan, PlanStepDef, RepeatBlock, StepKind, StepTarget } from '@/model/intervalPlan';
 import { flattenPlan, planEstimate, fmtPlanMeta, fmtTarget, paceFor } from '@/model/intervalPlan';
 import type { Sport } from '@/model/workout';
 import { pushOnePlan } from '@/sync/planSync';
@@ -478,7 +478,10 @@ function StepRow({
                     : 'Tap'}
             </span>
           </div>
-          <span className="builder-step-value">{fmtTarget(step.target)}</span>
+          <span className="builder-step-value">
+            {fmtTarget(step.target)}
+            {step.hrZone && <span className="tag tag-outline builder-step-zone">Z{step.hrZone}</span>}
+          </span>
         </button>
         {!selectable && (
           <DotsSixVertical
@@ -756,6 +759,7 @@ function StepSheet({
         : '',
   );
   const [eitherFocus, setEitherFocus] = useState<'time' | 'distance'>('time');
+  const [hrZone, setHrZone] = useState<HrZone | null>(initial?.hrZone ?? null);
   // The shown value acts "selected" until the first key: typing replaces it rather
   // than appending (reset on type/unit/preset/field switch).
   const [fresh, setFresh] = useState(true);
@@ -816,7 +820,7 @@ function StepSheet({
 
   function submit() {
     if (!valid) return;
-    onSubmit({ id: initial?.id ?? crypto.randomUUID(), kind, target });
+    onSubmit({ id: initial?.id ?? crypto.randomUUID(), kind, target, hrZone: hrZone ?? undefined });
   }
 
   const primaryLabel = isEditing ? 'Update step' : `+ Add ${CHIP_LABEL[chipKind]} · ${fmtTarget(target)}`;
@@ -944,6 +948,24 @@ function StepSheet({
           </>
         )}
         {type === 'manual' && <p className="muted small">Ends when you tap Next during the workout.</p>}
+
+        <div className="builder-sheet-section">
+          <span className="field-label">HR zone</span>
+          <div className="builder-chip-row">
+            <button className={`tag ${hrZone == null ? 'tag-accent builder-chip-active' : 'tag-outline'}`} onClick={() => setHrZone(null)}>
+              Off
+            </button>
+            {([1, 2, 3, 4, 5] as HrZone[]).map((z) => (
+              <button
+                key={z}
+                className={`tag ${hrZone === z ? 'tag-accent builder-chip-active' : 'tag-outline'}`}
+                onClick={() => setHrZone(z)}
+              >
+                Z{z}
+              </button>
+            ))}
+          </div>
+        </div>
 
         <button className="btn" onClick={submit} disabled={!valid}>
           {primaryLabel}

@@ -24,6 +24,11 @@ object RecState {
     @Volatile var stepKindIndex: Int = 1
     @Volatile var stepKindTotal: Int = 1
     @Volatile var nextStepLabel: String = ""
+    /** Active HR zone target (1..5), or 0 for "no target". */
+    @Volatile var targetZone: Int = 0
+    /** Zone-guard status: "in" | "high" | "low" | "none". */
+    @Volatile var zoneStatus: String = "none"
+    @Volatile var maxHr: Int = Zones.DEFAULT_MAX_HR
 
     /** F8 lap card: last completed lap, shown by LiveScreen while now - lastLapAtMs < 3000. */
     data class LapInfo(
@@ -70,6 +75,9 @@ object RecState {
         stepKindIndex = 1
         stepKindTotal = 1
         nextStepLabel = ""
+        targetZone = 0
+        zoneStatus = "none"
+        maxHr = Zones.DEFAULT_MAX_HR
         lastLap = null
         lastLapAtMs = 0L
         summaryReady = false

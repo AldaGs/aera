@@ -7,8 +7,16 @@ data class StepTarget(val type: String, val sec: Int = 0, val m: Int = 0)
 
 /** Mirrors `PlanStep` in src/model/intervalPlan.ts. kind: warmup|work|recovery|cooldown.
  * kindIndex/kindTotal are the 1-based rep count of this step's kind among the flattened
- * list (e.g. 3rd "work" step of 5) — same numbers baked into [label]. */
-data class PlanStep(val kind: String, val target: StepTarget, val label: String, val kindIndex: Int = 1, val kindTotal: Int = 1)
+ * list (e.g. 3rd "work" step of 5) — same numbers baked into [label]. hrZone (1..5, or
+ * null) is the step's own target, else falls back to the plan's own hrZone (see fromJson). */
+data class PlanStep(
+    val kind: String,
+    val target: StepTarget,
+    val label: String,
+    val kindIndex: Int = 1,
+    val kindTotal: Int = 1,
+    val hrZone: Int? = null,
+)
 
 /**
  * Steps a flattened plan forward on ExerciseUpdate ticks, mirroring
@@ -97,7 +105,7 @@ class PlanRunner(private val steps: List<PlanStep>, val autoFinish: Boolean) {
         )
 
         /** One authored step (or repeat block) before flattening/labeling. Mirrors PlanStepDef/RepeatBlock. */
-        private data class RawStep(val kind: String, val target: StepTarget)
+        private data class RawStep(val kind: String, val target: StepTarget, val hrZone: Int? = null)
 
         /** Expand an authored plan into the flat step list the runner walks. Mirrors flattenPlan(). */
         fun flatten(
@@ -121,9 +129,10 @@ class PlanRunner(private val steps: List<PlanStep>, val autoFinish: Boolean) {
         /**
          * Label a flat step list exactly like TS flattenPlan: 'work' always
          * "Work i/n"; every other kind is suffixed " i/n" only when that
-         * kind's count > 1; otherwise just KIND_LABEL.
+         * kind's count > 1; otherwise just KIND_LABEL. `planHrZone` fills in for
+         * steps that don't set their own (mirrors flattenPlan's `s.hrZone ?? m.hrZone`).
          */
-        private fun label(raw: List<RawStep>): List<PlanStep> {
+        private fun label(raw: List<RawStep>, planHrZone: Int? = null): List<PlanStep> {
             val totals = raw.groupingBy { it.kind }.eachCount()
             val counters = mutableMapOf<String, Int>()
             return raw.map { s ->
@@ -132,7 +141,7 @@ class PlanRunner(private val steps: List<PlanStep>, val autoFinish: Boolean) {
                 counters[s.kind] = i
                 val name = KIND_LABEL[s.kind] ?: s.kind
                 val lbl = if (s.kind == "work") "Work $i/$n" else if (n > 1) "$name $i/$n" else name
-                PlanStep(s.kind, s.target, lbl, kindIndex = i, kindTotal = n)
+                PlanStep(s.kind, s.target, lbl, kindIndex = i, kindTotal = n, hrZone = s.hrZone ?: planHrZone)
             }
         }
 
@@ -149,19 +158,24 @@ class PlanRunner(private val steps: List<PlanStep>, val autoFinish: Boolean) {
                     val inner = o.optJSONArray("steps") ?: org.json.JSONArray()
                     repeat(n) { out.addAll(expandSteps(inner)) }
                 } else {
-                    out.add(RawStep(o.optString("kind"), target(o.getJSONObject("target"))))
+                    val hrZone = if (o.has("hrZone")) o.optInt("hrZone") else null
+                    out.add(RawStep(o.optString("kind"), target(o.getJSONObject("target")), hrZone))
                 }
             }
             return out
         }
 
-        /** Parse a synced IntervalPlan JSON (see PlanStore) into steps + autoFinish.
+        /** Parse a synced IntervalPlan JSON (see PlanStore) into steps + autoFinish + maxHr.
          * New shape (`steps` array) is read directly; legacy shape (warmup/work/
-         * recovery/repeats/cooldown) is mapped the same way TS migratePlan does. */
-        fun fromJson(json: JSONObject): Pair<List<PlanStep>, Boolean> {
+         * recovery/repeats/cooldown) is mapped the same way TS migratePlan does. `maxHr`
+         * is a phone-computed extra the JS side stamps onto the payload (see
+         * src/screens/Record.tsx startOnWatch) — absent for older/legacy sends, in
+         * which case the caller should fall back to Zones.DEFAULT_MAX_HR. */
+        fun fromJson(json: JSONObject): Triple<List<PlanStep>, Boolean, Int?> {
             val stepsArr = json.optJSONArray("steps")
+            val planHrZone = if (json.has("hrZone")) json.optInt("hrZone") else null
             val steps = if (stepsArr != null && stepsArr.length() > 0) {
-                label(expandSteps(stepsArr))
+                label(expandSteps(stepsArr), planHrZone)
             } else {
                 fun legacyTarget(key: String): StepTarget? {
                     val o = json.opt(key) as? JSONObject ?: return null
@@ -170,7 +184,8 @@ class PlanRunner(private val steps: List<PlanStep>, val autoFinish: Boolean) {
                 val work = legacyTarget("work") ?: StepTarget("manual")
                 flatten(legacyTarget("warmup"), work, legacyTarget("recovery"), json.optInt("repeats", 1), legacyTarget("cooldown"))
             }
-            return steps to json.optBoolean("autoFinish", true)
+            val maxHr = if (json.has("maxHr")) json.optInt("maxHr") else null
+            return Triple(steps, json.optBoolean("autoFinish", true), maxHr)
         }
     }
 }

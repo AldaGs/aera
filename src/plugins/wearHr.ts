@@ -36,8 +36,15 @@ export interface WorkoutReceivedEvent {
 export interface WearBridgePlugin {
   /** A paired watch node is currently reachable. */
   isWatchConnected(): Promise<{ connected: boolean }>;
-  /** Mirror the current interval step to the watch UI. */
-  sendStep(opts: { label: string; kind: string; remainingSec: number }): Promise<void>;
+  /** Mirror the current interval step to the watch UI. targetZone/maxHr (when set)
+   * let the watch tint its HR readout the same way LiveRecorder does. */
+  sendStep(opts: {
+    label: string;
+    kind: string;
+    remainingSec: number;
+    targetZone?: number;
+    maxHr?: number;
+  }): Promise<void>;
   /** Buzz the watch on a transition (matches the phone's fireCue kinds). */
   sendCue(opts: { kind: string }): Promise<void>;
   /** Tell the watch to stop measuring (run finished). */

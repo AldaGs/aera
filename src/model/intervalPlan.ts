@@ -10,11 +10,16 @@ export type StepTarget =
   | { type: 'either'; sec: number; m: number } // whichever is reached first
   | { type: 'manual' };
 
+/** HR zone 1 (Easy) .. 5 (Max), by % of max HR (see hrZoneIndex). */
+export type HrZone = 1 | 2 | 3 | 4 | 5;
+
 /** One authored step in a plan's ordered `steps` list. */
 export interface PlanStepDef {
   id: string;
   kind: StepKind;
   target: StepTarget;
+  /** Optional HR zone target for this step; falls back to the plan's own hrZone. */
+  hrZone?: HrZone;
 }
 
 /** N repetitions of a small group of steps (e.g. work + recovery). */
@@ -35,6 +40,8 @@ export interface IntervalPlan {
   sport: Sport;
   steps: (PlanStepDef | RepeatBlock)[];
   autoFinish: boolean; // stop+save on completion, vs keep recording untimed
+  /** Run-level HR zone target, used by steps that don't set their own. */
+  hrZone?: HrZone;
   createdAt: string;
   /** ISO timestamp of the last edit; missing on old rows (fall back to createdAt). */
   updatedAt?: string;
@@ -85,6 +92,8 @@ export interface PlanStep {
   kind: StepKind;
   target: StepTarget;
   label: string; // e.g. "Warm-up", "Run 1/2", "Work 3/5", "Cooldown"
+  /** Effective HR zone target: the step's own, else the plan's, else undefined. */
+  hrZone?: HrZone;
 }
 
 const KIND_LABEL: Record<StepKind, string> = {
@@ -99,13 +108,13 @@ const KIND_LABEL: Record<StepKind, string> = {
 /** Expand an authored plan into the flat ordered step list the engine runs. */
 export function flattenPlan(p: IntervalPlan): PlanStep[] {
   const m = migratePlan(p);
-  const flat: { kind: StepKind; target: StepTarget }[] = [];
+  const flat: { kind: StepKind; target: StepTarget; hrZone?: HrZone }[] = [];
   const walk = (items: (PlanStepDef | RepeatBlock)[]) => {
     for (const it of items) {
       if ('repeat' in it) {
         for (let i = 0; i < Math.max(1, it.repeat); i++) walk(it.steps);
       } else {
-        flat.push({ kind: it.kind, target: it.target });
+        flat.push({ kind: it.kind, target: it.target, hrZone: it.hrZone });
       }
     }
   };
@@ -120,7 +129,7 @@ export function flattenPlan(p: IntervalPlan): PlanStep[] {
     // Legacy 'work' always shows "Work i/n" (as before); others only when count > 1.
     const label =
       s.kind === 'work' ? `Work ${i}/${n}` : n > 1 ? `${KIND_LABEL[s.kind]} ${i}/${n}` : KIND_LABEL[s.kind];
-    return { kind: s.kind, target: s.target, label };
+    return { kind: s.kind, target: s.target, label, hrZone: s.hrZone ?? m.hrZone };
   });
 }
 

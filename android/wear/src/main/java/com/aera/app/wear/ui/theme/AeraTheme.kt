@@ -26,6 +26,7 @@ object Nocturne {
     val accent900 = Color(0xFF2B2741)
 
     // Neutral ramp 100->900
+    val neutral400 = Color(0xFFB2B6CA)
     val neutral500 = Color(0xFF75798C)
     val neutral600 = Color(0xFF595D6C)
     val neutral700 = Color(0xFF3F424D)
@@ -36,6 +37,10 @@ object Nocturne {
 
     /** HR zone colors Z1..Z5. */
     val zoneColors = listOf(neutral700, accent800, accent600, accent400, accent200)
+
+    /** Zone-guard "above target" tint — desaturated amber, matches --color-attention
+     * on the phone (src/styles.css). */
+    val attention = Color(0xFFC9A26B)
 }
 
 private val wearColors = Colors(

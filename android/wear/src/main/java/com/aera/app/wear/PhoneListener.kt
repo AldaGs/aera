@@ -38,6 +38,8 @@ class PhoneListener : WearableListenerService() {
                     o.optString("label"),
                     o.optString("kind"),
                     o.optInt("remainingSec", 0),
+                    o.optInt("targetZone", 0),
+                    o.optInt("maxHr", 0),
                 )
             }
             "/aera/cue" -> vibrate(String(event.data))
@@ -145,6 +147,9 @@ class PhoneListener : WearableListenerService() {
             "work", "run" -> longArrayOf(0, 220, 120, 220)
             "recovery", "walk" -> longArrayOf(0, 120)
             "done" -> longArrayOf(0, 400)
+            "zone-high" -> longArrayOf(0, 150, 120, 150) // slow down: 2 short
+            "zone-low" -> longArrayOf(0, 500) // speed up: 1 long
+            "zone-back" -> longArrayOf(0, 40) // back in zone: 1 very short tick
             else -> longArrayOf(0, 180)
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
