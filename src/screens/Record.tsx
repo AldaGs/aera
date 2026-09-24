@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { SneakerMove, Bicycle, DeviceMobile, Watch, Play, Plus, PersonSimpleWalk, ArrowCounterClockwise, Repeat, Trash, PencilSimple } from '@phosphor-icons/react';
+import { DeviceMobile, Watch, Play, Plus, ArrowCounterClockwise, Repeat, Trash, PencilSimple } from '@phosphor-icons/react';
+import { SportIcon } from '@/ui/SportIcon';
 import type { Sport } from '@/model/workout';
 import { saveWorkout, listPlans, getPlan, deletePlan } from '@/db/db';
 import type { HrZone, IntervalPlan, StepTarget } from '@/model/intervalPlan';
@@ -293,21 +294,21 @@ export function Record({ onRecorded }: { onRecorded: () => void }) {
           className={`sport-opt ${sport === 'run' ? 'sport-opt-active' : ''}`}
           onClick={() => setSport('run')}
         >
-          <SneakerMove size={22} className={sport === 'run' ? 'icon-grad' : ''} />
+          <SportIcon sport="run" size={22} className={sport === 'run' ? 'icon-grad' : ''} />
           Run
         </button>
         <button
           className={`sport-opt ${sport === 'walk' ? 'sport-opt-active' : ''}`}
           onClick={() => setSport('walk')}
         >
-          <PersonSimpleWalk size={22} className={sport === 'walk' ? 'icon-grad' : ''} />
+          <SportIcon sport="walk" size={22} className={sport === 'walk' ? 'icon-grad' : ''} />
           Walk
         </button>
         <button
           className={`sport-opt ${sport === 'ride' ? 'sport-opt-active' : ''}`}
           onClick={() => setSport('ride')}
         >
-          <Bicycle size={22} className={sport === 'ride' ? 'icon-grad' : ''} />
+          <SportIcon sport="ride" size={22} className={sport === 'ride' ? 'icon-grad' : ''} />
           Ride
         </button>
       </div>
@@ -344,7 +345,7 @@ export function Record({ onRecorded }: { onRecorded: () => void }) {
             {plans.map((p) => (
               <li key={p.id} className="plan-row">
                 <button className="plan-main" onClick={() => startPlan(p)}>
-                  <span className="plan-emoji">{p.sport === 'run' ? '🏃' : p.sport === 'walk' ? '🚶' : '🚴'}</span>
+                  <span className="plan-emoji"><SportIcon sport={p.sport} size={22} /></span>
                   <div className="plan-info">
                     <span className="plan-name">{p.name}</span>
                     <span className="muted small">{planSummary(p)}</span>

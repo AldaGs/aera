@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { X, ShareNetwork, Mountains, Heart, Timer, Gauge, MapPin, Fire, Trash, Lightning, Pulse, SneakerMove, PersonSimpleWalk, Bicycle, Repeat, TrendUp } from '@phosphor-icons/react';
+import { X, ShareNetwork, Mountains, Heart, Timer, Gauge, MapPin, Fire, Trash, Lightning, Pulse, SneakerMove, Repeat, TrendUp } from '@phosphor-icons/react';
 import { getWorkout, deleteWorkout } from '@/db/db';
 import type { Lap, Sport, Workout } from '@/model/workout';
 import { RouteMap } from '@/ui/RouteMap';
+import { SPORT_ICON } from '@/ui/SportIcon';
 import { TrackChart, type ChartPoint } from '@/ui/TrackChart';
 import { paceSeries, haversine } from '@/metrics/deriveSummary';
 import { fmtDate, fmtDistance, fmtDuration, fmtPace, fmtSpeed, fmtPower, fmtCadence, fmtSteps } from '@/format';
@@ -69,7 +70,7 @@ export function WorkoutDetail({
   const showPace = isRun || isWalk;
   const s = w.summary;
 
-  const SportIcon = isRun ? SneakerMove : isWalk ? PersonSimpleWalk : Bicycle;
+  const SportIcon = SPORT_ICON[w.sport];
   const routePath = track
     .filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng) && (p.lat !== 0 || p.lng !== 0))
     .map((p) => [p.lat, p.lng] as [number, number]);

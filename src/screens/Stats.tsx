@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { SPORT_ICON } from '@/ui/SportIcon';
 import {
   Medal,
   TrendUp,
@@ -8,9 +9,6 @@ import {
   Mountains,
   Timer,
   Path,
-  SneakerMove,
-  PersonSimpleWalk,
-  Bicycle,
   Watch,
   DeviceMobile,
 } from '@phosphor-icons/react';
@@ -42,7 +40,6 @@ const RANGES: { id: Range; label: string }[] = [
   { id: 'all', label: 'All' },
 ];
 
-const SPORT_ICON = { run: SneakerMove, walk: PersonSimpleWalk, ride: Bicycle } as const;
 
 type View = 'summary' | 'calendar';
 

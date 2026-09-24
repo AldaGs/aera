@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Heart, ShareNetwork, Mountains, Timer, Gauge, MapPin } from '@phosphor-icons/react';
 import { listWorkouts, type WorkoutMeta } from '@/db/db';
 import { RouteMap } from '@/ui/RouteMap';
+import { SportIcon } from '@/ui/SportIcon';
 import { ProfileButton } from '@/screens/Profile';
 import { sumTotals, filterByRange } from '@/metrics/aggregate';
 import { loadProfile } from '@/store/profile';
@@ -89,12 +90,11 @@ function FeedCard({
   onShare: () => void;
 }) {
   const showPace = w.sport === 'run' || w.sport === 'walk';
-  const sportEmoji = w.sport === 'run' ? '🏃' : w.sport === 'walk' ? '🚶' : '🚴';
   return (
     <li className="card feed-card">
       <button className="feed-card-main" onClick={onOpen}>
         <div className="feed-card-head">
-          <div className="avatar-sm">{sportEmoji}</div>
+          <div className="avatar-sm"><SportIcon sport={w.sport} size={22} /></div>
           <div className="feed-card-meta">
             <span className="feed-card-title">{w.title}</span>
             <span className="muted small">{fmtDate(w.startedAt)}</span>
