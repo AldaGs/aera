@@ -3,51 +3,84 @@ package com.aera.app.wear
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
+import android.content.SharedPreferences
+import android.os.Build
 import android.os.Bundle
+import android.os.VibrationEffect
+import android.os.Vibrator
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.rotary.onRotaryScrollEvent
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
-import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
-import androidx.wear.compose.foundation.lazy.items
-import androidx.wear.compose.foundation.lazy.rememberScalingLazyListState
-import androidx.wear.compose.foundation.rotary.RotaryScrollableDefaults
-import androidx.wear.compose.foundation.rotary.rotaryScrollable
-import androidx.wear.compose.material.Chip
-import androidx.wear.compose.material.ChipDefaults
-import androidx.wear.compose.material.PositionIndicator
-import androidx.wear.compose.material.Scaffold
 import androidx.wear.compose.material.Text
-import androidx.wear.compose.material.TimeText
 import com.aera.app.wear.ui.theme.AeraTheme
 import com.aera.app.wear.ui.theme.Nocturne
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import org.json.JSONObject
+
+/** Run/Walk/Ride, in carousel order. */
+internal val SPORTS = listOf("run", "walk", "ride")
+internal fun sportLabel(s: String) = s.replaceFirstChar { it.uppercase() }
+internal fun sportIcon(s: String) = when (s) {
+    "walk" -> R.drawable.ic_sport_walk
+    "ride" -> R.drawable.ic_sport_ride
+    else -> R.drawable.ic_sport_run
+}
+
+private const val PREFS = "aera_wear"
+private const val KEY_LAST_SPORT = "last_sport"
+
+private fun lastSportIndex(context: Context): Int {
+    val prefs: SharedPreferences = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    val idx = SPORTS.indexOf(prefs.getString(KEY_LAST_SPORT, "run"))
+    return if (idx >= 0) idx else 0
+}
+
+private fun saveLastSport(context: Context, sport: String) {
+    context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(KEY_LAST_SPORT, sport).apply()
+}
 
 /**
  * Shared "start a run" behavior (phone hand-off, falling back to a standalone watch
  * recording): originally lived in PlansActivity, now also used from PlanDetailActivity's
- * Start chip (F9 2c).
+ * Start chip (F9 2c) and SportMenuActivity's Free item.
  */
 object PlanActions {
     /** Starts a plan: send the plan JSON to the phone, or record standalone if unreachable. */
@@ -58,12 +91,20 @@ object PlanActions {
             activity.runOnUiThread {
                 if (sent) {
                     ContextCompat.startForegroundService(activity, Intent(activity, HrService::class.java))
-                    activity.finish()
+                    showPhoneMirror(activity)
                 } else {
                     startStandalone(activity, planJson, null)
                 }
             }
         }.start()
+    }
+
+    /** Phone is recording: show the HR/step mirror as the only screen (back exits). */
+    private fun showPhoneMirror(activity: Activity) {
+        activity.startActivity(
+            Intent(activity, MainActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK),
+        )
     }
 
     /** Starts an untimed free recording for [sport] ("run"/"walk"/"ride"). */
@@ -76,7 +117,7 @@ object PlanActions {
             activity.runOnUiThread {
                 if (sent) {
                     ContextCompat.startForegroundService(activity, Intent(activity, HrService::class.java))
-                    activity.finish()
+                    showPhoneMirror(activity)
                 } else {
                     startStandalone(activity, null, sport)
                 }
@@ -95,9 +136,10 @@ object PlanActions {
 }
 
 /**
- * Plan list (1g/2c): Free run/walk/ride, then synced plans, then Quick goal. Tapping a
- * plan opens its step-list detail (PlanDetailActivity); tapping a free-run chip starts it
- * on the phone via WearCmd, falling back to a standalone recording if no phone is connected.
+ * Sport picker (Samsung Health style carousel): Run / Walk / Ride as overlapping circles,
+ * centered one enlarged. Bezel rotation and horizontal swipe move selection with a haptic
+ * tick; tapping the centered circle opens that sport's menu (SportMenuActivity). Remembers
+ * the last selected sport across launches.
  */
 class PlansActivity : ComponentActivity() {
 
@@ -105,82 +147,105 @@ class PlansActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContent {
             AeraTheme {
-                PlansScreen(
-                    onFree = { sport -> PlanActions.startFree(this, sport) },
-                    onPlan = { plan ->
-                        startActivity(Intent(this, PlanDetailActivity::class.java).putExtra(PlanDetailActivity.EXTRA_PLAN_JSON, plan.toString()))
+                SportPickerScreen(
+                    initialIndex = lastSportIndex(this),
+                    onSelect = { sport ->
+                        saveLastSport(this, sport)
+                        startActivity(Intent(this, SportMenuActivity::class.java).putExtra(SportMenuActivity.EXTRA_SPORT, sport))
                     },
-                    onQuickGoal = { startActivity(Intent(this, QuickGoalActivity::class.java)) },
                 )
             }
         }
     }
-
-    override fun onResume() {
-        super.onResume()
-        // Phase 5: retry any standalone recordings the phone hasn't acked yet.
-        Thread { WorkoutSync.retryPending(this) }.start()
-    }
-}
-
-private fun planLabel(plan: JSONObject): Pair<String, String?> {
-    val name = plan.optString("name", "Plan")
-    val steps = plan.optJSONArray("steps")
-    val n = steps?.length() ?: 0
-    return name to (if (n > 0) "synced from phone · $n steps" else "synced from phone")
 }
 
 @Composable
-private fun PlansScreen(onFree: (String) -> Unit, onPlan: (JSONObject) -> Unit, onQuickGoal: () -> Unit) {
+private fun SportPickerScreen(initialIndex: Int, onSelect: (String) -> Unit) {
     val context = LocalContext.current
-    var plans by remember { mutableStateOf<List<JSONObject>>(emptyList()) }
-    LaunchedEffect(Unit) {
-        plans = withContext(Dispatchers.IO) { PlanStore.listPlans(context) }
-    }
-
-    val listState = rememberScalingLazyListState()
+    val vibrator = remember { context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator }
+    var index by remember { mutableIntStateOf(initialIndex) }
+    var rotaryAccum by remember { mutableFloatStateOf(0f) }
     val focusRequester = remember { FocusRequester() }
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
-    Scaffold(
-        timeText = { TimeText() },
-        positionIndicator = { PositionIndicator(scalingLazyListState = listState) },
+
+    fun tick(amount: Int) {
+        val next = (index + amount).coerceIn(0, SPORTS.size - 1)
+        if (next != index) {
+            index = next
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                vibrator.vibrate(VibrationEffect.createOneShot(15, VibrationEffect.DEFAULT_AMPLITUDE))
+            } else vibrator.vibrate(15)
+        }
+    }
+
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(Nocturne.ground)
+            .focusRequester(focusRequester)
+            .focusable()
+            .onRotaryScrollEvent { event ->
+                rotaryAccum += event.verticalScrollPixels
+                if (rotaryAccum > 24f) { tick(1); rotaryAccum = 0f }
+                else if (rotaryAccum < -24f) { tick(-1); rotaryAccum = 0f }
+                true
+            }
+            .pointerInput(Unit) {
+                var dragAccum = 0f
+                detectHorizontalDragGestures(
+                    onDragStart = { dragAccum = 0f },
+                    onHorizontalDrag = { _, amount -> dragAccum += amount },
+                    onDragEnd = {
+                        if (dragAccum < -40f) tick(1) else if (dragAccum > 40f) tick(-1)
+                    },
+                )
+            },
+        contentAlignment = Alignment.Center,
     ) {
-        Box(Modifier.fillMaxSize().background(Nocturne.ground)) {
-            ScalingLazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .rotaryScrollable(
-                        RotaryScrollableDefaults.behavior(scrollableState = listState),
-                        focusRequester = focusRequester,
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(sportLabel(SPORTS[index]), color = Nocturne.text, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+            Spacer(Modifier.height(8.dp))
+            // Every circle is placed relative to the selected one, which sits dead
+            // center (Samsung-style); neighbors overlap behind it, smaller and faded.
+            val pos by animateFloatAsState(index.toFloat(), tween(180), label = "pos")
+            Box(Modifier.fillMaxWidth().height(120.dp), contentAlignment = Alignment.Center) {
+                SPORTS.withIndex()
+                    .sortedByDescending { (i, _) -> kotlin.math.abs(i - index) } // selected drawn last (on top)
+                    .forEach { (i, sport) ->
+                        val d = i - pos // signed distance from center, animated
+                        val dist = kotlin.math.abs(d)
+                        val centered = i == index
+                        val size = (110f - 30f * dist.coerceAtMost(1f) - 16f * (dist - 1f).coerceIn(0f, 1f)).dp
+                        Box(
+                            Modifier
+                                .offset(x = (d * 68f).dp)
+                                .size(size)
+                                .alpha(if (dist < 0.5f) 1f else (1f - 0.35f * dist).coerceAtLeast(0.3f))
+                                .background(if (centered) Nocturne.accent500 else Nocturne.accent800, CircleShape)
+                                .clickable(enabled = centered) { onSelect(sport) },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Image(
+                                painter = painterResource(sportIcon(sport)),
+                                contentDescription = sportLabel(sport),
+                                colorFilter = ColorFilter.tint(if (centered) Nocturne.ground else Nocturne.neutral400),
+                                modifier = Modifier.size(size * 0.5f),
+                            )
+                        }
+                    }
+            }
+            Spacer(Modifier.height(10.dp))
+            Row {
+                SPORTS.forEachIndexed { i, _ ->
+                    Box(
+                        Modifier
+                            .padding(horizontal = 3.dp)
+                            .size(if (i == index) 6.dp else 4.dp)
+                            .background(if (i == index) Nocturne.accent300 else Nocturne.neutral600, CircleShape),
                     )
-                    .focusRequester(focusRequester)
-                    .focusable(),
-                state = listState,
-                autoCentering = androidx.wear.compose.foundation.lazy.AutoCenteringParams(itemIndex = 0),
-            ) {
-                item { PlanChip(title = "Free run", subtitle = null, onClick = { onFree("run") }) }
-                item { PlanChip(title = "Free walk", subtitle = null, onClick = { onFree("walk") }) }
-                item { PlanChip(title = "Free ride", subtitle = null, onClick = { onFree("ride") }) }
-                items(plans) { plan ->
-                    val (title, subtitle) = planLabel(plan)
-                    PlanChip(title = title, subtitle = subtitle, onClick = { onPlan(plan) })
                 }
-                item { PlanChip(title = "Quick goal", subtitle = null, onClick = onQuickGoal) }
             }
         }
     }
 }
 
-@Composable
-private fun PlanChip(title: String, subtitle: String?, onClick: () -> Unit) {
-    Chip(
-        onClick = onClick,
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
-        colors = ChipDefaults.chipColors(
-            backgroundColor = Nocturne.accent900,
-            contentColor = Nocturne.text,
-        ),
-        label = { Text(title, fontWeight = FontWeight.Medium, fontSize = 15.sp) },
-        secondaryLabel = subtitle?.let { { Text(it, color = Nocturne.accent300, fontSize = 11.sp) } },
-    )
-}

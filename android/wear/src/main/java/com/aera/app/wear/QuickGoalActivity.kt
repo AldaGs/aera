@@ -61,14 +61,15 @@ import org.json.JSONObject
 class QuickGoalActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val sport = intent.getStringExtra(EXTRA_SPORT) ?: "run"
         setContent {
             AeraTheme {
-                QuickGoalScreen(onStart = { type, timeSec, distM -> start(type, timeSec, distM) })
+                QuickGoalScreen(onStart = { type, timeSec, distM -> start(sport, type, timeSec, distM) })
             }
         }
     }
 
-    private fun start(type: String, timeSec: Int, distM: Int) {
+    private fun start(sport: String, type: String, timeSec: Int, distM: Int) {
         val id = UUID.randomUUID().toString()
         val now = PlanEdit.isoNow()
         val work = JSONObject().put("type", type)
@@ -80,29 +81,27 @@ class QuickGoalActivity : ComponentActivity() {
         val plan = JSONObject()
             .put("id", id)
             .put("name", name)
-            .put("sport", "run")
-            .put("steps", org.json.JSONArray().put(JSONObject().put("id", UUID.randomUUID().toString()).put("kind", "run").put("target", work)))
+            .put("sport", sport)
+            .put("steps", org.json.JSONArray().put(JSONObject().put("id", UUID.randomUUID().toString()).put("kind", stepKind(sport)).put("target", work)))
             .put("autoFinish", true)
             .put("createdAt", now)
             .put("updatedAt", now)
 
         Thread {
-            val planJson = plan.toString()
-            PlanStore.putPlan(this, planJson)
-            val sent = WearCmd.send(this, "start:$planJson")
-            runOnUiThread {
-                if (sent) {
-                    ContextCompat.startForegroundService(this, Intent(this, HrService::class.java))
-                    finish()
-                } else {
-                    val intent = Intent(this, RecordActivity::class.java)
-                    intent.putExtra(RecordActivity.EXTRA_SPORT, RecordActivity.sportOf(planJson))
-                    intent.putExtra(RecordActivity.EXTRA_PLAN_JSON, planJson)
-                    startActivity(intent)
-                    finish()
-                }
-            }
+            PlanStore.putPlan(this, plan.toString())
+            runOnUiThread { PlanActions.startPlan(this, plan) }
         }.start()
+    }
+
+    /** Step kind that labels the goal right on the live screen ("Run", "Walk", or neutral "Work"). */
+    private fun stepKind(sport: String) = when (sport) {
+        "run" -> "run"
+        "walk" -> "walk"
+        else -> "work"
+    }
+
+    companion object {
+        const val EXTRA_SPORT = "sport"
     }
 }
 
