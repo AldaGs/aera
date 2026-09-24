@@ -82,6 +82,9 @@ function gradeCostFactor(grade: number): number {
 }
 
 /** Five-zone model by percentage of max HR: Z1<60, Z2<70, Z3<80, Z4<90, Z5≥90. */
+/** Fastest plausible speed per sport (m/s); anything faster is a GPS teleport. */
+export const MAX_SPEED_MS: Record<Sport, number> = { run: 12, walk: 5, ride: 25 };
+
 export function hrZoneIndex(hr: number, maxHr: number): number {
   const pct = hr / maxHr;
   if (pct < 0.6) return 0;
@@ -394,7 +397,7 @@ export function deriveSummary(
 
     const moving = segSpeed >= MOVING_SPEED_THRESHOLD_MS;
     if (moving) movingMs += segMs;
-    if (segSpeed > maxSpeedMs) maxSpeedMs = segSpeed;
+    if (segSpeed > maxSpeedMs && segSpeed <= MAX_SPEED_MS[sport]) maxSpeedMs = segSpeed; // skip GPS teleports
 
     // elevation: accumulate against a hysteresis reference on the smoothed series
     const a = smoothAlt[i];

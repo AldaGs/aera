@@ -9,6 +9,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.os.SystemClock
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
@@ -34,6 +35,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.text.SimpleDateFormat
+import java.time.Instant
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
@@ -207,27 +209,40 @@ class ExerciseService : Service() {
         lastActiveMs = activeMs
 
         update.latestMetrics.getData(DataType.DISTANCE_TOTAL)?.let { distanceM = it.total }
-        update.latestMetrics.getData(DataType.HEART_RATE_BPM).lastOrNull()?.let {
-            val v = it.value.toInt()
-            if (v > 0) lastHr = v
-        }
-        if (lastHr > 0) {
-            hrSamples.add(activeMs to lastHr)
-            lapHrSum += lastHr
-            lapHrCount++
-        }
-        val speed = update.latestMetrics.getData(DataType.SPEED).lastOrNull()?.value
-        update.latestMetrics.getData(DataType.LOCATION).lastOrNull()?.value?.let { loc ->
+        // Screen off, Health Services batches samples (one update can carry minutes of
+        // data). Consume every sample at its own time — taking only the last one left
+        // GPS points minutes apart (straight lines across the track) and stepped HR.
+        val nowMs = System.currentTimeMillis()
+        val bootInstant = Instant.ofEpochMilli(nowMs - SystemClock.elapsedRealtime())
+        fun activeAt(sampleMs: Long) = (activeMs - (nowMs - sampleMs)).coerceIn(0L, activeMs)
+        val hrBatch = update.latestMetrics.getData(DataType.HEART_RATE_BPM)
+            .filter { it.value > 0 }
+            .map { activeAt(it.getTimeInstant(bootInstant).toEpochMilli()) to it.value.toInt() }
+        val speeds = update.latestMetrics.getData(DataType.SPEED)
+        val speed = speeds.lastOrNull()?.value
+        var hi = 0
+        for (loc in update.latestMetrics.getData(DataType.LOCATION)) {
+            val t = activeAt(loc.getTimeInstant(bootInstant).toEpochMilli())
+            while (hi < hrBatch.size && hrBatch[hi].first <= t) {
+                recordHr(hrBatch[hi].first, hrBatch[hi].second)
+                hi++
+            }
+            if (points.isNotEmpty() && t <= points.last().t) continue // out-of-order/duplicate fix
+            val v = loc.value
             points.add(
                 RecPoint(
-                    t = activeMs,
-                    lat = loc.latitude,
-                    lng = loc.longitude,
-                    alt = loc.altitude.takeIf { it != -1000.0 && !it.isNaN() },
+                    t = t,
+                    lat = v.latitude,
+                    lng = v.longitude,
+                    alt = v.altitude.takeIf { it > -1000.0 && it < 10000.0 },
                     hr = lastHr.takeIf { it > 0 },
-                    speed = speed,
+                    speed = speeds.minByOrNull { kotlin.math.abs(it.timeDurationFromBoot.toMillis() - loc.timeDurationFromBoot.toMillis()) }?.value,
                 ),
             )
+        }
+        while (hi < hrBatch.size) {
+            recordHr(hrBatch[hi].first, hrBatch[hi].second)
+            hi++
         }
 
         RecState.elapsedSec = (activeMs / 1000).toInt()
@@ -388,6 +403,14 @@ class ExerciseService : Service() {
         val id = workoutId
         val ctx = applicationContext
         Thread { WorkoutSync.upload(ctx, id) }.start()
+    }
+
+    private fun recordHr(t: Long, bpm: Int) {
+        if (hrSamples.isNotEmpty() && t < hrSamples.last().first) return
+        lastHr = bpm
+        hrSamples.add(t to bpm)
+        lapHrSum += bpm
+        lapHrCount++
     }
 
     private fun workoutsDir() = File(filesDir, "workouts")

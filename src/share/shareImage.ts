@@ -16,14 +16,14 @@ function blobToBase64(blob: Blob): Promise<string> {
 }
 
 /**
- * Share or save a PNG blob.
+ * Share or save a file blob (PNG card, JSON export).
  *
  * On native (Capacitor) the browser's `navigator.share`/`<a download>` don't
  * work in the WebView, so we write the file to the cache dir and hand its URI to
  * the native Share sheet (which surfaces Instagram, Save-to-Photos, etc.).
  * On the web we fall back to the Web Share API, then a plain download.
  */
-export async function shareOrDownloadPng(
+export async function shareOrDownloadFile(
   blob: Blob,
   filename: string,
 ): Promise<'shared' | 'downloaded'> {
@@ -38,7 +38,7 @@ export async function shareOrDownloadPng(
     return 'shared';
   }
 
-  const file = new File([blob], filename, { type: 'image/png' });
+  const file = new File([blob], filename, { type: blob.type });
   const nav = navigator as Navigator & {
     canShare?: (data: ShareData) => boolean;
   };

@@ -9,7 +9,7 @@ import {
   svgToPngBlob,
   type Template,
 } from '@/share/renderShareCard';
-import { shareOrDownloadPng } from '@/share/shareImage';
+import { shareOrDownloadFile } from '@/share/shareImage';
 
 export function ShareComposer({ id, onClose }: { id: string; onClose: () => void }) {
   const [w, setW] = useState<Workout | undefined>();
@@ -35,7 +35,7 @@ export function ShareComposer({ id, onClose }: { id: string; onClose: () => void
     try {
       const blob = await svgToPngBlob(svg, spec.w, spec.h);
       const safe = w.title.replace(/[^\w]+/g, '-').toLowerCase();
-      const result = await shareOrDownloadPng(blob, `aera-${safe}.png`);
+      const result = await shareOrDownloadFile(blob, `aera-${safe}.png`);
       setToast(result === 'shared' ? 'Shared' : 'Saved PNG');
     } catch {
       setToast('Export failed');

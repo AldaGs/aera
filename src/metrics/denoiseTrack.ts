@@ -1,10 +1,9 @@
 import type { Sport, TrackPoint } from '@/model/workout';
-import { haversine } from './deriveSummary';
+import { haversine, MAX_SPEED_MS } from './deriveSummary';
 
 // Same gates as the phone recorder (record/engine.ts onSample).
 const STATIONARY_SPEED_MS = 0.5; // slower than this = standing still
 const NOISE_FLOOR_M = 4; // GPS wobble while standing still
-const MAX_SPEED_MS: Record<Sport, number> = { run: 12, walk: 5, ride: 25 };
 
 /**
  * Pin GPS jitter in place: a point only moves the track when it's a real move

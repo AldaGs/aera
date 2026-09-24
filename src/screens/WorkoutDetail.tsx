@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { X, ShareNetwork, Mountains, Heart, Timer, Gauge, MapPin, Fire, Trash, Lightning, Pulse, SneakerMove, Repeat, TrendUp } from '@phosphor-icons/react';
+import { X, ShareNetwork, Mountains, Heart, Timer, Gauge, MapPin, Fire, Trash, Lightning, Pulse, SneakerMove, Repeat, TrendUp, DownloadSimple } from '@phosphor-icons/react';
+import { exportWorkoutJson } from '@/share/exportJson';
 import { getWorkout, deleteWorkout } from '@/db/db';
 import type { Lap, Sport, Workout } from '@/model/workout';
 import { RouteMap } from '@/ui/RouteMap';
@@ -302,6 +303,9 @@ export function WorkoutDetail({
 
         <button className="btn" onClick={() => onShare(id)}>
           <ShareNetwork size={18} /> Share
+        </button>
+        <button className="btn-ghost" onClick={() => void exportWorkoutJson(w)}>
+          <DownloadSimple size={18} /> Export JSON
         </button>
         <button className="btn-ghost btn-danger" onClick={handleDelete} disabled={deleting}>
           <Trash size={18} /> {deleting ? 'Deleting…' : 'Delete activity'}

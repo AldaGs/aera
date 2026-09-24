@@ -39,7 +39,7 @@ export async function importWatchWorkout(json: string): Promise<void> {
       t: p.t,
       lat: p.lat,
       lng: p.lng,
-      alt: p.alt,
+      alt: p.alt != null && Math.abs(p.alt) < 10000 ? p.alt : null, // MAX_VALUE = unknown
       hr: p.hr,
       cad: p.cad,
       speed: p.speed,
