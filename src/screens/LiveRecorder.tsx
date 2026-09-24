@@ -8,6 +8,7 @@ import { startLocationUpdates, type LocationWatcher } from '@/record/location';
 import { fireCue } from '@/record/cues';
 import { startWatchSensors, type WatchSensors } from '@/record/hr';
 import { WearBridge } from '@/plugins/wearHr';
+import type { PluginListenerHandle } from '@capacitor/core';
 import { RouteMap } from '@/ui/RouteMap';
 import { fmtDistance, fmtDuration, fmtPace, fmtSpeed } from '@/format';
 import { effectiveMaxHr, loadProfile } from '@/store/profile';
@@ -142,6 +143,26 @@ export function LiveRecorder({
     const w = await engineRef.current.finish();
     onDone(w?.id ?? null);
   }
+
+  // Watch Stop (/aera/cmd "stop") finishes + saves the phone run, same as Finish.
+  const stopRef = useRef(stop);
+  stopRef.current = stop;
+  useEffect(() => {
+    let handle: PluginListenerHandle | null = null;
+    let active = true;
+    WearBridge.addListener('cmd', (e) => {
+      if (e.cmd === 'stop') stopRef.current();
+    })
+      .then((h) => {
+        if (active) handle = h;
+        else h.remove();
+      })
+      .catch(() => {}); // web: no native bridge
+    return () => {
+      active = false;
+      handle?.remove();
+    };
+  }, []);
 
   function cancel() {
     if (!confirm('Discard this recording?')) return;
