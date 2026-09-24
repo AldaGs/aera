@@ -6,6 +6,7 @@ import com.google.android.gms.wearable.DataEvent
 import com.google.android.gms.wearable.DataEventBuffer
 import com.google.android.gms.wearable.DataItem
 import com.google.android.gms.wearable.DataMap
+import com.google.android.gms.wearable.DataMapItem
 import com.google.android.gms.wearable.MessageEvent
 import com.google.android.gms.wearable.Wearable
 import com.google.android.gms.wearable.WearableListenerService
@@ -63,8 +64,9 @@ class WearMessageListener : WearableListenerService() {
      * it live when the Capacitor bridge is up. */
     private fun handleWorkoutItem(item: DataItem) {
         val id = item.uri.lastPathSegment ?: return
-        val dataMap = DataMap.fromByteArray(item.data ?: return)
-        val asset = dataMap.getAsset(WORKOUT_ASSET_KEY) ?: return
+        // Assets live beside the item, not in item.data: DataMap.fromByteArray(data)
+        // can't resolve them ("Index 0 out of bounds"), so no watch run ever imported.
+        val asset = DataMapItem.fromDataItem(item).dataMap.getAsset(WORKOUT_ASSET_KEY) ?: return
         val ctx = applicationContext
         Thread {
             try {

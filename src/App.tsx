@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { syncWatchWorkouts } from '@/sync/workoutSync';
 import { TabBar, type Tab } from '@/nav/TabBar';
 import { Home } from '@/screens/Home';
 import { Record } from '@/screens/Record';
@@ -18,6 +19,17 @@ export function App() {
   function bump() {
     setReloadKey((k) => k + 1);
   }
+
+  // Pull watch recordings on start and whenever the app returns to the foreground,
+  // on any tab (a frozen app can miss the live 'workoutReceived' event).
+  useEffect(() => {
+    const drain = () => {
+      if (document.visibilityState === 'visible') syncWatchWorkouts().then((n) => n > 0 && bump());
+    };
+    drain();
+    document.addEventListener('visibilitychange', drain);
+    return () => document.removeEventListener('visibilitychange', drain);
+  }, []);
 
   return (
     <div className="app">

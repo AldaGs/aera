@@ -11,6 +11,7 @@ import com.getcapacitor.annotation.CapacitorPlugin
 import com.google.android.gms.tasks.Tasks
 import com.google.android.gms.wearable.DataClient
 import com.google.android.gms.wearable.DataMap
+import com.google.android.gms.wearable.DataMapItem
 import com.google.android.gms.wearable.PutDataMapRequest
 import com.google.android.gms.wearable.Wearable
 import org.json.JSONObject
@@ -255,6 +256,7 @@ class WearBridgePlugin : Plugin() {
         val ctx = context
         Thread {
             val arr = JSArray()
+            val seen = mutableSetOf<String>()
             pendingWorkoutsDir(ctx).listFiles()
                 ?.filter { it.name.endsWith(".json") }
                 ?.forEach { f ->
@@ -262,10 +264,32 @@ class WearBridgePlugin : Plugin() {
                         val o = JSObject()
                         o.put("json", f.readText())
                         arr.put(o)
+                        seen.add(f.name.removeSuffix(".json"))
                     } catch (e: Exception) {
                         Log.w("WearBridge", "read pending workout failed: ${e.message}")
                     }
                 }
+            // Also read the DataItems themselves: Samsung freezes the app in the
+            // background, so WearMessageListener may never have run to save them.
+            try {
+                val dc = Wearable.getDataClient(ctx)
+                val uri = Uri.Builder().scheme("wear").path("/aera/workout/").build()
+                val items = Tasks.await(dc.getDataItems(uri, DataClient.FILTER_PREFIX))
+                for (i in 0 until items.count) {
+                    val item = items[i]
+                    val id = item.uri.lastPathSegment ?: continue
+                    if (!seen.add(id)) continue
+                    val asset = DataMapItem.fromDataItem(item).dataMap.getAsset("json") ?: continue
+                    val fd = Tasks.await(dc.getFdForAsset(asset))
+                    val o = JSObject()
+                    o.put("json", fd.inputStream.use { it.readBytes() }.toString(Charsets.UTF_8))
+                    arr.put(o)
+                }
+                items.release()
+            } catch (e: Exception) {
+                Log.w("WearBridge", "read workout DataItems failed: ${e.message}")
+            }
+            Log.d("WearBridge", "getPendingWorkouts: ${arr.length()}")
             val res = JSObject()
             res.put("workouts", arr)
             call.resolve(res)

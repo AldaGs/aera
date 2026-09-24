@@ -33,13 +33,17 @@ object WorkoutSync {
     /** Upload one finished workout by id (called right after finishAndSave, and on retry). */
     fun upload(context: Context, id: String) {
         val file = File(workoutsDir(context), "$id.json")
-        if (!file.exists()) return
+        if (!file.exists()) {
+            Log.w(TAG, "upload $id: no file")
+            return
+        }
         if (RecState.sumWorkoutId == id) RecState.syncState = "syncing"
         try {
             val req = PutDataMapRequest.create(WORKOUT_PATH_PREFIX + id)
             req.dataMap.putAsset(WORKOUT_ASSET_KEY, Asset.createFromBytes(file.readBytes()))
             req.setUrgent()
             Tasks.await(Wearable.getDataClient(context).putDataItem(req.asPutDataRequest()))
+            Log.d(TAG, "uploaded workout $id (${file.length()} bytes)")
         } catch (e: Exception) {
             Log.w(TAG, "upload $id failed: ${e.message}")
         }

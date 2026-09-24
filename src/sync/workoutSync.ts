@@ -1,7 +1,7 @@
 import { Capacitor } from '@capacitor/core';
 import { getWorkout, saveWorkout } from '@/db/db';
 import { buildWorkoutFromTrack, type RawLap } from '@/record/engine';
-import type { Sport, TrackPoint } from '@/model/workout';
+import type { Sport, TrackPoint, Workout } from '@/model/workout';
 import { WearBridge } from '@/plugins/wearHr';
 
 /** Shape of ExerciseService.buildWorkoutJson() on the watch. */
@@ -44,8 +44,9 @@ export async function importWatchWorkout(json: string): Promise<void> {
       speed: p.speed,
       power: p.power,
     }));
-    if (points.length < 2) {
-      await ackWorkout(w.id); // too short to import — still clear it off the watch
+    const durationSec = w.summary?.durationSec ?? 0;
+    if (points.length < 2 && durationSec < 10) {
+      await ackWorkout(w.id); // accidental start/stop — nothing worth keeping
       return;
     }
     const workout = buildWorkoutFromTrack(
@@ -56,11 +57,28 @@ export async function importWatchWorkout(json: string): Promise<void> {
       'watch',
       w.id,
     );
+    // No GPS (indoors, or a warm-up in place): keep the run with the watch's own
+    // totals instead of dropping it — distance comes from its step-based estimate.
+    if (points.length < 2) applyWatchTotals(workout.summary, w.summary.distanceM ?? 0, durationSec, sport);
     await saveWorkout(workout);
     await ackWorkout(w.id);
   } catch (e) {
     console.warn('importWatchWorkout failed:', e);
   }
+}
+
+function applyWatchTotals(
+  s: Workout['summary'],
+  distanceM: number,
+  durationSec: number,
+  sport: Sport,
+): void {
+  s.distanceM = distanceM;
+  s.durationMovingSec = durationSec;
+  s.durationElapsedSec = durationSec;
+  const km = distanceM / 1000;
+  if (sport === 'ride') s.avgSpeedKmh = durationSec > 0 ? km / (durationSec / 3600) : null;
+  else s.avgPaceSecPerKm = km > 0.05 ? durationSec / km : null;
 }
 
 async function ackWorkout(id: string): Promise<void> {
@@ -73,12 +91,14 @@ async function ackWorkout(id: string): Promise<void> {
 
 /** Drain any workouts the watch already pushed while the app was closed. Call
  * once on app start. Never throws. */
-export async function syncWatchWorkouts(): Promise<void> {
-  if (!Capacitor.isNativePlatform()) return;
+export async function syncWatchWorkouts(): Promise<number> {
+  if (!Capacitor.isNativePlatform()) return 0;
   try {
     const { workouts } = await WearBridge.getPendingWorkouts();
     for (const w of workouts) await importWatchWorkout(w.json);
+    return workouts.length;
   } catch (e) {
     console.warn('syncWatchWorkouts failed:', e);
+    return 0;
   }
 }
