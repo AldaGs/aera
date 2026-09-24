@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { X, ShareNetwork, Mountains, Heart, Timer, Gauge, MapPin, Fire, Trash, Lightning, Pulse, SneakerMove, Repeat, TrendUp } from '@phosphor-icons/react';
+import { X, ShareNetwork, Mountains, Heart, Timer, Gauge, MapPin, Fire, Trash, Lightning, Pulse, SneakerMove, PersonSimpleWalk, Bicycle, Repeat, TrendUp } from '@phosphor-icons/react';
 import { getWorkout, deleteWorkout } from '@/db/db';
 import type { Lap, Sport, Workout } from '@/model/workout';
 import { RouteMap } from '@/ui/RouteMap';
@@ -69,7 +69,10 @@ export function WorkoutDetail({
   const showPace = isRun || isWalk;
   const s = w.summary;
 
-  const sportEmoji = isRun ? '🏃' : isWalk ? '🚶' : '🚴';
+  const SportIcon = isRun ? SneakerMove : isWalk ? PersonSimpleWalk : Bicycle;
+  const routePath = track
+    .filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng) && (p.lat !== 0 || p.lng !== 0))
+    .map((p) => [p.lat, p.lng] as [number, number]);
   const sportLabel = isRun ? 'Run' : isWalk ? 'Walk' : 'Ride';
 
   return (
@@ -77,11 +80,12 @@ export function WorkoutDetail({
       <OverlayHead onClose={onClose} title={w.title} />
       <div className="overlay-body">
         <p className="muted small">
-          {sportEmoji} {sportLabel} · {fmtDate(w.startedAt)}
+          <SportIcon size={14} style={{ verticalAlign: '-2px' }} /> {sportLabel} · {fmtDate(w.startedAt)}
         </p>
 
         <div className="detail-map">
-          <RouteMap path={s.routePreview} bounds={s.bounds} height={220} strokeWidth={4} />
+          {/* Full GPS track, not the 48-point thumbnail preview (laps looked polygonal). */}
+          <RouteMap path={routePath.length >= 2 ? routePath : s.routePreview} bounds={s.bounds} height={220} strokeWidth={2} />
         </div>
 
         <div className="stat-grid detail-grid">

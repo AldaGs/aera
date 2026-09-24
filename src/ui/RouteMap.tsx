@@ -47,8 +47,8 @@ export function RouteMap({
     return [x, y];
   };
 
-  const pts = path.map(project);
-  const d = pts.map(([x, y], i) => `${i ? 'L' : 'M'}${x.toFixed(1)} ${y.toFixed(1)}`).join(' ');
+  const pts = thin(path.map(project), 1.5);
+  const d = smoothPath(pts);
   const [sx, sy] = pts[0];
   const [ex, ey] = pts[pts.length - 1];
 
@@ -70,4 +70,33 @@ export function RouteMap({
       )}
     </svg>
   );
+}
+
+/** Drop points closer than `minPx` to the last kept one (GPS jitter, overdraw). */
+function thin(pts: [number, number][], minPx: number): [number, number][] {
+  const out: [number, number][] = [pts[0]];
+  for (let i = 1; i < pts.length - 1; i++) {
+    const [lx, ly] = out[out.length - 1];
+    if (Math.hypot(pts[i][0] - lx, pts[i][1] - ly) >= minPx) out.push(pts[i]);
+  }
+  out.push(pts[pts.length - 1]);
+  return out;
+}
+
+/** Catmull-Rom through the points as cubic Béziers → curves instead of corners. */
+function smoothPath(pts: [number, number][]): string {
+  const f = (n: number) => n.toFixed(1);
+  let d = `M${f(pts[0][0])} ${f(pts[0][1])}`;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p0 = pts[i - 1] ?? pts[i];
+    const p1 = pts[i];
+    const p2 = pts[i + 1];
+    const p3 = pts[i + 2] ?? p2;
+    const c1x = p1[0] + (p2[0] - p0[0]) / 6;
+    const c1y = p1[1] + (p2[1] - p0[1]) / 6;
+    const c2x = p2[0] - (p3[0] - p1[0]) / 6;
+    const c2y = p2[1] - (p3[1] - p1[1]) / 6;
+    d += ` C${f(c1x)} ${f(c1y)} ${f(c2x)} ${f(c2y)} ${f(p2[0])} ${f(p2[1])}`;
+  }
+  return d;
 }
