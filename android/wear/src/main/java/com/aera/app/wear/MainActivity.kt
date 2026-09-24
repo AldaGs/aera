@@ -63,6 +63,8 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         // Phase 2 verification: confirms plan DataItems reached the watch.
         Thread { android.util.Log.d("aera-wear", "synced plans: ${PlanStore.listPlans(this).size}") }.start()
+        // Phase 5: retry any standalone recordings the phone hasn't acked yet.
+        Thread { WorkoutSync.retryPending(this) }.start()
     }
 
     private fun toggleMeasuring() {

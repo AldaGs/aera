@@ -115,6 +115,12 @@ class PlansActivity : ComponentActivity() {
             }
         }
     }
+
+    override fun onResume() {
+        super.onResume()
+        // Phase 5: retry any standalone recordings the phone hasn't acked yet.
+        Thread { WorkoutSync.retryPending(this) }.start()
+    }
 }
 
 private fun planLabel(plan: JSONObject): Pair<String, String?> {

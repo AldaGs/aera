@@ -7,7 +7,8 @@ export type WorkoutSource =
   | 'health-connect'
   | 'samsung-health'
   | 'healthkit'
-  | 'manual';
+  | 'manual'
+  | 'watch';
 
 /** One recorded GPS sample (~1/sec). The raw stream is the source of truth. */
 export interface TrackPoint {

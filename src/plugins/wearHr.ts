@@ -23,6 +23,11 @@ export interface BatteryEvent {
   battery: number;
 }
 
+/** A standalone watch recording delivered as a DataItem (Phase 5), as JSON. */
+export interface WorkoutReceivedEvent {
+  json: string;
+}
+
 /**
  * Bridge to the native WearBridge plugin (Kotlin) that talks to the aera Wear OS
  * companion over the Wearable Data Layer. The watch streams HR to the phone; the
@@ -49,6 +54,12 @@ export interface WearBridgePlugin {
   startOnWatch(opts: { json?: string; sport: string }): Promise<{ sent: boolean }>;
   /** Ask the connected watch to report its battery (reply arrives as a `battery` event). */
   pingWatch(): Promise<void>;
+  /** Watch recordings persisted to filesDir/pending-workouts because the app
+   * wasn't running when they arrived (Phase 5 pending retry). */
+  getPendingWorkouts(): Promise<{ workouts: WorkoutReceivedEvent[] }>;
+  /** Clear a synced workout: deletes the pending file + DataItem, and tells
+   * the watch to drop its local copy. */
+  ackWorkout(opts: { id: string }): Promise<void>;
   /** Subscribe to live HR samples pushed from the watch. */
   addListener(
     eventName: 'hr',
@@ -71,6 +82,11 @@ export interface WearBridgePlugin {
   addListener(
     eventName: 'battery',
     listener: (event: BatteryEvent) => void,
+  ): Promise<PluginListenerHandle>;
+  /** Fires when a watch recording DataItem is received live (app already running). */
+  addListener(
+    eventName: 'workoutReceived',
+    listener: (event: WorkoutReceivedEvent) => void,
   ): Promise<PluginListenerHandle>;
 }
 

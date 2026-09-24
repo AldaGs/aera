@@ -347,10 +347,16 @@ class ExerciseService : Service() {
         RecState.sumAvgPaceSecPerKm = RunMath.avgPaceSecPerKm(distanceM, durationSec)
         RecState.sumAvgHr = if (hrSamples.isNotEmpty()) (hrSamples.sumOf { it.second } / hrSamples.size) else 0
         RecState.sumZoneSecs = Zones.zoneSeconds(hrSamples)
-        RecState.syncState = "pending" // Phase 5 DataClient upload will drive this.
+        RecState.syncState = "pending"
         RecState.summaryReady = true
         // Last: RecordActivity closes when running goes false without a summary ready.
         RecState.running = false
+        // Plain Thread, not `scope`: stopSelf() below tears the service (and scope)
+        // down shortly after, which would cancel a coroutine mid-upload. Matches
+        // the Thread{}.start() pattern the rest of the Data Layer calls use.
+        val id = workoutId
+        val ctx = applicationContext
+        Thread { WorkoutSync.upload(ctx, id) }.start()
     }
 
     private fun workoutsDir() = File(filesDir, "workouts")

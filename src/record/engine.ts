@@ -1,4 +1,4 @@
-import type { Lap, Sport, TrackPoint, Workout } from '@/model/workout';
+import type { Lap, Sport, TrackPoint, Workout, WorkoutSource } from '@/model/workout';
 import type { PlanStep, StepKind } from '@/model/intervalPlan';
 import { deriveSummary, haversine } from '@/metrics/deriveSummary';
 import { saveWorkout } from '@/db/db';
@@ -48,6 +48,75 @@ const AUTO_PAUSE_AFTER_MS = 6000; // stationary this long → auto-pause the clo
 interface LapMeta {
   kind: StepKind;
   label: string;
+}
+
+/** One lap boundary with its plan metadata — the shape both live recording
+ * (lapStartsMs + lapMeta) and the watch's uploaded JSON (laps[]) reduce to. */
+export interface RawLap {
+  startMs: number;
+  endMs: number;
+  kind: string;
+  label: string;
+}
+
+function lapsFromBounds(points: TrackPoint[], raw: RawLap[], sport: Sport): Lap[] {
+  return raw.map((l, i) => {
+    const seg = points.filter((p) => p.t >= l.startMs && p.t <= l.endMs);
+    let dist = 0;
+    const hrs: number[] = [];
+    for (let j = 1; j < seg.length; j++) {
+      dist += haversine(seg[j - 1].lat, seg[j - 1].lng, seg[j].lat, seg[j].lng);
+      if (seg[j].hr != null) hrs.push(seg[j].hr!);
+    }
+    const durationSec = (l.endMs - l.startMs) / 1000;
+    const km = dist / 1000;
+    return {
+      index: i,
+      type: l.kind === 'recovery' ? 'rest' : l.kind === 'walk' ? 'walk' : sport,
+      startMs: l.startMs,
+      endMs: l.endMs,
+      distanceM: dist,
+      durationSec,
+      avgPaceSecPerKm: km > 0 ? durationSec / km : null,
+      avgHr: hrs.length ? hrs.reduce((a, b) => a + b, 0) / hrs.length : null,
+      label: l.label,
+    };
+  });
+}
+
+/**
+ * Build a normalized Workout from a finished point stream + lap boundaries —
+ * the shared tail end of both live recording (finish(), below) and watch-import
+ * (src/sync/workoutSync.ts). Pure aside from the id default; no storage.
+ */
+export function buildWorkoutFromTrack(
+  sport: Sport,
+  startedAtMs: number,
+  points: TrackPoint[],
+  laps: RawLap[],
+  source: WorkoutSource,
+  id: string = crypto.randomUUID(),
+): Workout {
+  const profile = loadProfile();
+  const summary = deriveSummary(points, sport, {
+    maxHr: effectiveMaxHr(profile),
+    restingHr: profile.restingHr,
+    weightKg: profile.weightKg,
+  });
+  if (laps.length > 0) summary.laps = lapsFromBounds(points, laps, sport);
+  return {
+    id,
+    sport,
+    source,
+    startedAt: new Date(startedAtMs).toISOString(),
+    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    track: points,
+    summary,
+    title: `${partOfDay(startedAtMs)} ${sportLabel(sport)}`,
+    notes: '',
+    athleteId: 'me',
+    externalId: null,
+  };
 }
 
 interface Persisted {
@@ -318,34 +387,21 @@ export class RecordingEngine {
     
     if (this.points.length < 2) return null;
 
-    const profile = loadProfile();
-    const summary = deriveSummary(this.points, this.sport, {
-      maxHr: effectiveMaxHr(profile),
-      restingHr: profile.restingHr,
-      weightKg: profile.weightKg,
-    });
-    // Planned interval laps (typed + labeled) win; else manual laps; else the
-    // derived split from deriveSummary.
-    if (this.lapMeta.length > 0) {
-      summary.laps = this.buildPlannedLaps();
-    } else if (this.lapStartsMs.length > 1) {
-      summary.laps = this.buildManualLaps();
-    }
-
-    const startISO = new Date(this.startedAtMs).toISOString();
-    const workout: Workout = {
-      id: crypto.randomUUID(),
-      sport: this.sport,
-      source: 'manual',
-      startedAt: startISO,
-      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-      track: this.points,
-      summary,
-      title: `${partOfDay(this.startedAtMs)} ${sportLabel(this.sport)}`,
-      notes: '',
-      athleteId: 'me',
-      externalId: null,
-    };
+    // Planned interval laps (typed + labeled) go through the shared assembler (the
+    // same path watch-import uses). Built from the lap *boundaries* so laps tapped
+    // after a plan ends (no meta) are kept, just untyped.
+    const planned = this.lapMeta.length > 0;
+    const bounds = [...this.lapStartsMs, this.elapsedMs()];
+    const laps: RawLap[] = planned
+      ? bounds.slice(0, -1).map((startMs, i) => ({
+          startMs,
+          endMs: bounds[i + 1],
+          kind: this.lapMeta[i]?.kind ?? '',
+          label: this.lapMeta[i]?.label ?? '',
+        }))
+      : [];
+    const workout = buildWorkoutFromTrack(this.sport, this.startedAtMs, this.points, laps, 'manual');
+    if (!planned && this.lapStartsMs.length > 1) workout.summary.laps = this.buildManualLaps();
     await saveWorkout(workout);
     return workout;
   }
@@ -384,19 +440,6 @@ export class RecordingEngine {
     return laps;
   }
 
-  /** Type + label the plan boundaries into laps (recovery → 'rest', else sport). */
-  private buildPlannedLaps(): Lap[] {
-    const base = this.buildManualLaps();
-    return base.map((lap, i) => {
-      const meta = this.lapMeta[i];
-      if (!meta) return lap;
-      return {
-        ...lap,
-        type: meta.kind === 'recovery' ? 'rest' : meta.kind === 'walk' ? 'walk' : this.sport,
-        label: meta.label,
-      };
-    });
-  }
 
   private planProgress(): PlanProgress | undefined {
     if (!this.plan) return undefined;

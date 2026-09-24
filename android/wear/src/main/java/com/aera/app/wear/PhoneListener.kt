@@ -6,6 +6,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.BatteryManager
 import android.os.Build
 import android.os.VibrationEffect
@@ -20,6 +21,7 @@ import com.google.android.gms.wearable.MessageEvent
 import com.google.android.gms.wearable.Wearable
 import com.google.android.gms.wearable.WearableListenerService
 import org.json.JSONObject
+import java.io.File
 
 /**
  * Receives phone → watch messages: `/aera/step` (mirror the current interval step),
@@ -45,7 +47,24 @@ class PhoneListener : WearableListenerService() {
             }
             "/aera/startwatch" -> handleStartWatch(String(event.data))
             "/aera/ping" -> replyBattery()
+            "/aera/workoutack" -> handleWorkoutAck(String(event.data))
         }
+    }
+
+    /** Phone confirmed it stored a workout (Phase 5): drop our local copy and,
+     * if it's the one on screen, flip the summary's sync line to "Synced". */
+    private fun handleWorkoutAck(id: String) {
+        File(filesDir, "workouts/$id.json").delete()
+        if (RecState.sumWorkoutId == id) RecState.syncState = "synced"
+        val ctx = applicationContext
+        Thread {
+            try {
+                val uri = Uri.Builder().scheme("wear").path("/aera/workout/$id").build()
+                Tasks.await(Wearable.getDataClient(ctx).deleteDataItems(uri))
+            } catch (e: Exception) {
+                Log.w("aera-wear", "delete workout DataItem failed: ${e.message}")
+            }
+        }.start()
     }
 
     /**

@@ -67,6 +67,23 @@ and vice versa.
   then deletes the DataItem (ack).
 - Dedup by id. Large tracks: use `Asset` if payload > 100 KB.
 
+**Done.** Watch: `WorkoutSync.upload()` puts `workouts/{id}.json` as an Asset
+DataItem at `/aera/workout/{id}` right after `finishAndSave()`, and
+`retryPending()` re-puts anything still on disk on `MainActivity`/
+`PlansActivity` resume (idempotent). Phone: `WearMessageListener.onDataChanged`
+reads the Asset, always persists it to `filesDir/pending-workouts/{id}.json`,
+and emits `workoutReceived` when the bridge is alive; `WearBridgePlugin` adds
+`getPendingWorkouts()`/`ackWorkout()`. JS: `src/sync/workoutSync.ts` converts
+via a new shared `buildWorkoutFromTrack()` (factored out of
+`RecordingEngine.finish()`), dedups by id by checking `getWorkout()` first
+(`saveWorkout` also uses `id` as the primary key), saves, then acks. Ack
+round-trips `/aera/workoutack` back to the watch, which deletes the local file
+and its own DataItem copy, and flips `RecState.syncState` to `"synced"`.
+`WorkoutSource` gained `'watch'`; `isWatchRecorded()` already covered it
+(`source !== 'manual'`). Verified: `npm run build`, all `scripts/check-*.ts`
+(incl. new `check-watch-import.ts`), `gradlew :wear:assembleDebug
+:wear:testDebugUnitTest :app:assembleDebug`.
+
 ---
 
 ## Out of scope (add when needed)

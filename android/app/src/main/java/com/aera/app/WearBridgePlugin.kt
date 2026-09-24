@@ -14,9 +14,15 @@ import com.google.android.gms.wearable.DataMap
 import com.google.android.gms.wearable.PutDataMapRequest
 import com.google.android.gms.wearable.Wearable
 import org.json.JSONObject
+import java.io.File
 
 private const val PLAN_PATH_PREFIX = "/aera/plan/"
 private const val PLAN_JSON_KEY = "json"
+private const val WORKOUT_PATH_PREFIX = "/aera/workout/"
+
+/** Where watch workouts land when the Capacitor bridge isn't alive to receive
+ * them live (see WearMessageListener.onDataChanged) — drained via [getPendingWorkouts]. */
+fun pendingWorkoutsDir(ctx: android.content.Context) = File(ctx.filesDir, "pending-workouts")
 
 /**
  * Phone-side bridge to the aera Wear OS companion over the Wearable Data Layer.
@@ -65,6 +71,15 @@ class WearBridgePlugin : Plugin() {
             val data = JSObject()
             data.put("battery", pct)
             p.notifyListeners("battery", data)
+        }
+
+        /** Called from [WearMessageListener] when a watch workout DataItem arrives
+         * and the bridge is alive (Phase 5). */
+        fun emitWorkoutReceived(json: String) {
+            val p = instance ?: return
+            val data = JSObject()
+            data.put("json", json)
+            p.notifyListeners("workoutReceived", data)
         }
     }
 
@@ -228,6 +243,59 @@ class WearBridgePlugin : Plugin() {
                 res.put("plans", JSArray())
                 call.resolve(res)
             }
+        }.start()
+    }
+
+    /** Watch workouts persisted to disk (Phase 5) because the bridge wasn't alive
+     * when they arrived — drained on app start / 'workoutReceived' miss. */
+    @PluginMethod
+    fun getPendingWorkouts(call: PluginCall) {
+        val ctx = context
+        Thread {
+            val arr = JSArray()
+            pendingWorkoutsDir(ctx).listFiles()
+                ?.filter { it.name.endsWith(".json") }
+                ?.forEach { f ->
+                    try {
+                        val o = JSObject()
+                        o.put("json", f.readText())
+                        arr.put(o)
+                    } catch (e: Exception) {
+                        Log.w("WearBridge", "read pending workout failed: ${e.message}")
+                    }
+                }
+            val res = JSObject()
+            res.put("workouts", arr)
+            call.resolve(res)
+        }.start()
+    }
+
+    /** A watch workout was imported: drop the pending file, delete the DataItem,
+     * and tell the watch (`/aera/workoutack`) so it clears its own copy. */
+    @PluginMethod
+    fun ackWorkout(call: PluginCall) {
+        val id = call.getString("id")
+        if (id == null) {
+            call.reject("id is required")
+            return
+        }
+        val ctx = context
+        Thread {
+            File(pendingWorkoutsDir(ctx), "$id.json").delete()
+            try {
+                val uri = Uri.Builder().scheme("wear").path(WORKOUT_PATH_PREFIX + id).build()
+                Tasks.await(Wearable.getDataClient(ctx).deleteDataItems(uri))
+            } catch (e: Exception) {
+                Log.w("WearBridge", "delete workout DataItem failed: ${e.message}")
+            }
+            try {
+                val nodes = Tasks.await(Wearable.getNodeClient(ctx).connectedNodes)
+                val mc = Wearable.getMessageClient(ctx)
+                for (n in nodes) Tasks.await(mc.sendMessage(n.id, "/aera/workoutack", id.toByteArray()))
+            } catch (e: Exception) {
+                Log.w("WearBridge", "workoutack send failed: ${e.message}")
+            }
+            call.resolve()
         }.start()
     }
 }

@@ -17,6 +17,7 @@ import {
 import { WearBridge } from '@/plugins/wearHr';
 import { Capacitor, type PluginListenerHandle } from '@capacitor/core';
 import { syncPlans, mergeIncomingPlan, pushOnePlan } from '@/sync/planSync';
+import { syncWatchWorkouts, importWatchWorkout } from '@/sync/workoutSync';
 import { StartSheet } from '@/screens/StartSheet';
 
 /**
@@ -50,6 +51,14 @@ export function Record({ onRecorded }: { onRecorded: () => void }) {
       const handles: PluginListenerHandle[] = [];
 
       syncPlans().then(reloadPlans);
+      syncWatchWorkouts();
+
+      WearBridge.addListener('workoutReceived', (e) => {
+        importWatchWorkout(e.json).then(onRecorded);
+      }).then((h) => {
+        if (active) handles.push(h);
+        else h.remove();
+      }).catch(() => {});
 
       WearBridge.addListener('cmd', (e) => {
         if (e.cmd === 'start') {
