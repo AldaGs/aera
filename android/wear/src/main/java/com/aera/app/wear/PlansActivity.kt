@@ -32,6 +32,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -164,7 +165,7 @@ private fun SportPickerScreen(initialIndex: Int, onSelect: (String) -> Unit) {
     val context = LocalContext.current
     val vibrator = remember { context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator }
     var index by remember { mutableIntStateOf(initialIndex) }
-    var rotaryAccum by remember { mutableFloatStateOf(0f) }
+    var lastRotaryMs by remember { mutableLongStateOf(0L) }
     val focusRequester = remember { FocusRequester() }
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
 
@@ -185,9 +186,14 @@ private fun SportPickerScreen(initialIndex: Int, onSelect: (String) -> Unit) {
             .focusRequester(focusRequester)
             .focusable()
             .onRotaryScrollEvent { event ->
-                rotaryAccum += event.verticalScrollPixels
-                if (rotaryAccum > 24f) { tick(1); rotaryAccum = 0f }
-                else if (rotaryAccum < -24f) { tick(-1); rotaryAccum = 0f }
+                // Galaxy touch bezel: one event per detent, so each click = one step
+                // (a pixel threshold made single clicks do nothing, which felt laggy).
+                // Short debounce keeps a high-res crown from skipping several items.
+                val now = event.uptimeMillis
+                if (event.verticalScrollPixels != 0f && now - lastRotaryMs > 70) {
+                    lastRotaryMs = now
+                    tick(if (event.verticalScrollPixels > 0) 1 else -1)
+                }
                 true
             }
             .pointerInput(Unit) {
@@ -207,7 +213,7 @@ private fun SportPickerScreen(initialIndex: Int, onSelect: (String) -> Unit) {
             Spacer(Modifier.height(8.dp))
             // Every circle is placed relative to the selected one, which sits dead
             // center (Samsung-style); neighbors overlap behind it, smaller and faded.
-            val pos by animateFloatAsState(index.toFloat(), tween(180), label = "pos")
+            val pos by animateFloatAsState(index.toFloat(), tween(110), label = "pos")
             Box(Modifier.fillMaxWidth().height(120.dp), contentAlignment = Alignment.Center) {
                 SPORTS.withIndex()
                     .sortedByDescending { (i, _) -> kotlin.math.abs(i - index) } // selected drawn last (on top)
