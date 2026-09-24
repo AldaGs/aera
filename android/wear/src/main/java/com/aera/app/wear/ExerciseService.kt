@@ -48,10 +48,9 @@ private const val TAG = "aera-wear"
  * step-advance rules (src/record/engine.ts checkPlanAdvance/advanceStep) on top of the
  * active-duration/distance the client reports.
  *
- * ponytail: Health Services auto-pause is exercise-wide, unlike the phone engine which
- * disables it during timed steps (recovery must keep ticking). Replicating that gating
- * would mean overriding auto-pause on every plan step transition; accepted as a Phase 4
- * limitation — upgrade if standalone recovery-step auto-pause turns out to matter.
+ * Auto-pause follows the phone engine's rule: off during time/manual steps (standing
+ * still in a warm-up or timed recovery must keep the clock running), on for distance/
+ * either steps and free runs — toggled per step via overrideAutoPauseAndResume….
  */
 class ExerciseService : Service() {
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
@@ -162,11 +161,14 @@ class ExerciseService : Service() {
                 // style already used elsewhere in this module (WearCmd, PlanStore).
                 val caps = exerciseClient.getCapabilitiesAsync().get()
                 val typeCaps = caps.getExerciseTypeCapabilities(exerciseType)
+                supportsAutoPause = typeCaps.supportsAutoPauseAndResume
                 val wanted = setOf(DataType.HEART_RATE_BPM, DataType.DISTANCE_TOTAL, DataType.LOCATION, DataType.SPEED)
                 val dataTypes = wanted.filter { it in typeCaps.supportedDataTypes }.toSet()
                 val config = ExerciseConfig.builder(exerciseType)
                     .setDataTypes(dataTypes)
-                    .setIsAutoPauseAndResumeEnabled(typeCaps.supportsAutoPauseAndResume)
+                    .setIsAutoPauseAndResumeEnabled(
+                        typeCaps.supportsAutoPauseAndResume && PlanRunner.autoPauseWanted(runner),
+                    )
                     .setIsGpsEnabled(DataType.LOCATION in dataTypes)
                     .build()
                 exerciseClient.setUpdateCallback(mainExecutor, updateCallback)
@@ -262,11 +264,27 @@ class ExerciseService : Service() {
         maybePersist()
     }
 
+    private var supportsAutoPause = false
+
+    /** Re-apply the per-step auto-pause rule (see class doc) after a step change. */
+    private fun applyAutoPauseForStep() {
+        if (!supportsAutoPause) return
+        val wanted = PlanRunner.autoPauseWanted(runner)
+        scope.launch {
+            try {
+                exerciseClient.overrideAutoPauseAndResumeForActiveExerciseAsync(wanted).get()
+            } catch (e: Exception) {
+                Log.w(TAG, "auto-pause override failed: ${e.message}")
+            }
+        }
+    }
+
     private fun onStepChanged(r: PlanRunner, activeMs: Long, endedStepLabel: String) {
         lapStartsMs.add(activeMs)
         if (!r.complete) lapMeta.add(r.currentStep.kind to r.currentStep.label)
         closeLap(activeMs, distanceM, trigger = endedStepLabel)
         zoneGuard.reset() // new step (or plan end) → target changed, timers restart
+        applyAutoPauseForStep()
         vibrate(if (r.complete) "done" else r.currentStep.kind)
         if (r.complete && r.autoFinish) {
             exerciseClient.endExerciseAsync()

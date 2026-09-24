@@ -85,49 +85,18 @@ private fun saveLastSport(context: Context, sport: String) {
  * Start chip (F9 2c) and SportMenuActivity's Free item.
  */
 object PlanActions {
-    /** Starts a plan: send the plan JSON to the phone, or record standalone if unreachable. */
-    fun startPlan(activity: Activity, plan: JSONObject) {
-        Thread {
-            val planJson = plan.toString()
-            val sent = WearCmd.send(activity, "start:$planJson")
-            activity.runOnUiThread {
-                if (sent) {
-                    ContextCompat.startForegroundService(activity, Intent(activity, HrService::class.java))
-                    showPhoneMirror(activity)
-                } else {
-                    startStandalone(activity, planJson, null)
-                }
-            }
-        }.start()
-    }
+    // A run started on the watch always records on the watch (its GPS + HR), then
+    // uploads to the phone (WorkoutSync) — like Samsung Health. Handing it to the phone
+    // failed silently whenever the phone app was frozen/closed or off the Record tab.
+    // The phone-GPS mode is still used when the run is started from the phone.
 
-    /** Phone is recording: show the HR/step mirror as the only screen (back exits). */
-    private fun showPhoneMirror(activity: Activity) {
-        activity.startActivity(
-            Intent(activity, MainActivity::class.java)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK),
-        )
-    }
+    /** Starts [plan] as a watch recording. */
+    fun startPlan(activity: Activity, plan: JSONObject) = startStandalone(activity, plan.toString(), null)
 
-    /** Starts an untimed free recording for [sport] ("run"/"walk"/"ride"). */
-    fun startFree(activity: Activity, sport: String) {
-        Thread {
-            // F10: free runs use the same {"free":true,"sport":...} JSON shape as plans so
-            // Record.tsx has one payload shape to parse, instead of a bare "start" special case.
-            val json = JSONObject().put("free", true).put("sport", sport).toString()
-            val sent = WearCmd.send(activity, "start:$json")
-            activity.runOnUiThread {
-                if (sent) {
-                    ContextCompat.startForegroundService(activity, Intent(activity, HrService::class.java))
-                    showPhoneMirror(activity)
-                } else {
-                    startStandalone(activity, null, sport)
-                }
-            }
-        }.start()
-    }
+    /** Starts an untimed free watch recording for [sport] ("run"/"walk"/"ride"). */
+    fun startFree(activity: Activity, sport: String) = startStandalone(activity, null, sport)
 
-    /** No phone connected: record directly on the watch via ExerciseService (Phase 4). */
+    /** Record directly on the watch via ExerciseService. */
     private fun startStandalone(activity: Activity, planJson: String?, sport: String?) {
         val intent = Intent(activity, RecordActivity::class.java)
         intent.putExtra(RecordActivity.EXTRA_SPORT, sport ?: RecordActivity.sportOf(planJson))

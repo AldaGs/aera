@@ -165,6 +165,15 @@ class PlanRunner(private val steps: List<PlanStep>, val autoFinish: Boolean) {
             return out
         }
 
+        /** Auto-pause only where standing still means "not training": free runs, a
+         * finished plan, and distance / either steps. Never in time/manual steps (a
+         * warm-up or timed recovery must keep ticking). Mirrors engine.ts tick(). */
+        fun autoPauseWanted(runner: PlanRunner?): Boolean {
+            if (runner == null || runner.complete) return true
+            val t = runner.currentStep.target.type
+            return t == "distance" || t == "either"
+        }
+
         /** Parse a synced IntervalPlan JSON (see PlanStore) into steps + autoFinish + maxHr.
          * New shape (`steps` array) is read directly; legacy shape (warmup/work/
          * recovery/repeats/cooldown) is mapped the same way TS migratePlan does. `maxHr`

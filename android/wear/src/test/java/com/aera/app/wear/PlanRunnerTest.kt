@@ -175,4 +175,22 @@ class PlanRunnerTest {
         assertEquals("Work 1/2", flat[1].label)
         assertEquals("Recovery 2/2", flat[4].label)
     }
+
+    @Test
+    fun autoPauseOnlyInDistanceEitherAndFreeRuns() {
+        assertTrue(PlanRunner.autoPauseWanted(null)) // free run
+        val r = PlanRunner(
+            listOf(
+                PlanStep("warmup", StepTarget("time", sec = 300), "Warm-up"),
+                PlanStep("run", StepTarget("distance", m = 1500), "Run"),
+                PlanStep("cooldown", StepTarget("either", sec = 300, m = 800), "Cooldown"),
+            ),
+            true,
+        )
+        assertFalse(PlanRunner.autoPauseWanted(r)) // time warm-up keeps ticking
+        r.next(300_000, 0.0)
+        assertTrue(PlanRunner.autoPauseWanted(r)) // distance step
+        r.next(700_000, 1500.0)
+        assertTrue(PlanRunner.autoPauseWanted(r)) // either step
+    }
 }
