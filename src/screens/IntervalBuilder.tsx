@@ -9,6 +9,7 @@ import {
   Backspace,
   Trash,
   Check,
+  PencilSimple,
 } from '@phosphor-icons/react';
 import { savePlan } from '@/db/db';
 import type { HrZone, IntervalPlan, PlanStepDef, RepeatBlock, StepKind, StepTarget } from '@/model/intervalPlan';
@@ -202,12 +203,18 @@ export function IntervalBuilder({
           </button>
         </header>
 
-        <input
-          className="builder-name"
-          value={draft.name}
-          placeholder={defaultName(draft)}
-          onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))}
-        />
+        {/* Visibly editable (pencil + underline): a borderless field showing the auto
+            name as placeholder read as a fixed title, so plans never got renamed. */}
+        <label className="builder-name-wrap">
+          <input
+            className="builder-name"
+            value={draft.name}
+            placeholder="Name this workout"
+            aria-label="Workout name"
+            onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))}
+          />
+          <PencilSimple size={18} className="builder-name-icon" />
+        </label>
         <div className="builder-meta">
           <button className="tag tag-accent builder-sport-tag" onClick={cycleSport}>
             {SPORT_LABEL[draft.sport]}
