@@ -17,7 +17,7 @@ export type CueKind = StepKind | 'done' | 'zone-high' | 'zone-low' | 'zone-back'
 export async function fireCue(kind: CueKind): Promise<void> {
   if (!Capacitor.isNativePlatform()) return;
   if (kind === 'countdown') {
-    // Phone-only tick (the watch doesn't know this kind).
+    WearBridge.sendCue({ kind }).catch(() => {});
     await Haptics.impact({ style: ImpactStyle.Light }).catch(() => {});
     return;
   }

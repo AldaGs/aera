@@ -19,6 +19,7 @@ import androidx.core.app.NotificationCompat
 import androidx.health.services.client.ExerciseUpdateCallback
 import androidx.health.services.client.HealthServices
 import androidx.health.services.client.data.Availability
+import androidx.health.services.client.data.BatchingMode
 import androidx.health.services.client.data.DataType
 import androidx.health.services.client.data.ExerciseConfig
 import androidx.health.services.client.data.ExerciseLapSummary
@@ -180,6 +181,8 @@ class ExerciseService : Service() {
                         typeCaps.supportsAutoPauseAndResume && PlanRunner.autoPauseWanted(runner),
                     )
                     .setIsGpsEnabled(DataType.LOCATION in dataTypes)
+                    // Live HR every 5 s with the screen off instead of minute-long batches.
+                    .setBatchingModeOverrides(setOf(BatchingMode.HEART_RATE_5_SECONDS).filter { it in caps.supportedBatchingModeOverrides }.toSet())
                     .build()
                 exerciseClient.setUpdateCallback(mainExecutor, updateCallback)
                 exerciseClient.startExerciseAsync(config).get()

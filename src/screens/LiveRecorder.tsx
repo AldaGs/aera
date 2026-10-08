@@ -84,6 +84,7 @@ export function LiveRecorder({
       return;
     }
     void fireCue('countdown');
+    WearBridge.sendLive({ json: JSON.stringify({ countdown: startCd }) }).catch(() => {});
     const t = setTimeout(() => setStartCd((c) => (c == null ? c : c - 1)), 1000);
     return () => clearTimeout(t);
   }, [startCd]);
@@ -129,8 +130,8 @@ export function LiveRecorder({
       }
     });
 
-    // 1 s ticker so the timer advances between GPS fixes.
-    const timer = setInterval(() => engine.tick(), 1000);
+    // 250 ms ticker so the timer flips seconds on time (and the watch mirror with it).
+    const timer = setInterval(() => engine.tick(), 250);
 
     return () => {
       active = false;
@@ -151,6 +152,38 @@ export function LiveRecorder({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stats?.plan?.complete]);
+
+  // Mirror the whole live screen to the watch (~1 Hz: elapsedSec changes once a second).
+  useEffect(() => {
+    if (!watchConnected || !stats || stats.status === 'idle') return;
+    const p = stats.plan && !stats.plan.complete ? stats.plan : null;
+    WearBridge.sendLive({
+      json: JSON.stringify({
+        paused: stats.status === 'paused' || stats.autoPaused,
+        autoPaused: stats.autoPaused,
+        elapsedSec: Math.floor(stats.elapsedSec),
+        elapsedMs: Math.round(stats.elapsedSec * 1000), // watch extrapolates from this
+        distanceM: stats.distanceM,
+        paceSecPerKm: Math.round(stats.currentPaceSecPerKm ?? stats.paceSecPerKm ?? 0),
+        hr: Math.round(stats.liveHr ?? 0),
+        stepLabel: p?.label ?? '',
+        stepKind: p?.kind ?? '',
+        stepIndex: p?.stepIndex ?? 0,
+        stepTotal: p?.total ?? 0,
+        rep: p?.rep ?? 1,
+        reps: p?.reps ?? 1,
+        fraction: p?.fraction ?? 0,
+        remainingSec: p?.remainingUnit === 'sec' ? Math.round(p.remaining ?? 0) : 0,
+        remainingM: p?.remainingUnit === 'm' ? Math.round(p.remaining ?? 0) : 0,
+        targetM: p?.remainingUnit === 'm' ? Math.round(p.stepTarget ?? 0) : 0,
+        next: p?.next ?? '',
+        targetZone: stats.targetHrZone ?? 0,
+        zoneStatus: stats.hrZoneStatus,
+        maxHr: maxHr ?? 0,
+      }),
+    }).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [watchConnected, Math.floor(stats?.elapsedSec ?? 0), stats?.status, stats?.autoPaused, stats?.plan?.stepIndex]);
 
   // Mirror the current interval step to the watch on each transition; the watch
   // counts the remaining time down locally.
@@ -202,7 +235,11 @@ export function LiveRecorder({
     let handle: PluginListenerHandle | null = null;
     let active = true;
     WearBridge.addListener('cmd', (e) => {
+      const eng = engineRef.current;
       if (e.cmd === 'stop') stopRef.current();
+      else if (e.cmd === 'pause') eng.pause();
+      else if (e.cmd === 'resume') eng.resume();
+      else if (e.cmd === 'lap') eng.lap();
     })
       .then((h) => {
         if (active) handle = h;
@@ -256,7 +293,13 @@ export function LiveRecorder({
             </span>
           )}
           <span className={`rec-chip ${geoError ? 'rec-chip-bad' : ''}`}>
-            <GpsFix size={12} /> {geoError ? 'No GPS' : path.length ? 'GPS' : 'Acquiring…'}
+            <GpsFix size={12} /> {geoError
+              ? 'No GPS'
+              : plan && !plan.complete && plan.kind === 'warmup' && (plan.targetType === 'time' || plan.targetType === 'manual')
+                ? 'GPS off · warm-up'
+                : path.length
+                  ? 'GPS'
+                  : 'Acquiring…'}
           </span>
         </div>
       </header>

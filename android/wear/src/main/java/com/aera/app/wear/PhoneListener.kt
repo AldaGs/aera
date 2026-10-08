@@ -43,10 +43,18 @@ class PhoneListener : WearableListenerService() {
                 )
             }
             "/aera/cue" -> vibrate(String(event.data))
+            "/aera/live" -> applyLive(String(event.data))
             "/aera/stop" -> {
                 AeraState.clearStep()
+                if (RecState.mirror) {
+                    RecState.running = false
+                    RecState.paused = false
+                    RecState.mirror = false
+                    getSystemService(NotificationManager::class.java).cancel(4)
+                }
                 stopService(Intent(this, HrService::class.java))
             }
+            "/aera/hrstart" -> startHr()
             "/aera/startwatch" -> handleStartWatch(String(event.data))
             "/aera/ping" -> replyBattery()
             "/aera/workoutack" -> handleWorkoutAck(String(event.data))
@@ -117,6 +125,87 @@ class PhoneListener : WearableListenerService() {
         }
     }
 
+    /** Phone started recording: stream HR without the user opening the watch app.
+     * Same background-FGS window as [handleStartWatch]. */
+    private fun startHr() {
+        if (AeraState.measuring || ExerciseService.isRunning()) return
+        if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.BODY_SENSORS) != PackageManager.PERMISSION_GRANTED) {
+            Log.w("aera-wear", "hrstart: BODY_SENSORS not granted")
+            return
+        }
+        try {
+            ContextCompat.startForegroundService(this, Intent(this, HrService::class.java))
+        } catch (e: Exception) {
+            Log.w("aera-wear", "hrstart refused: ${e.message}")
+        }
+    }
+
+    /** Phone recording heartbeat (~1 Hz): mirror it into RecState for RecordActivity. */
+    private fun applyLive(json: String) {
+        if (ExerciseService.isRunning()) return // a watch recording owns RecState
+        val o = try { JSONObject(json) } catch (e: Exception) { return }
+        val first = !RecState.mirror
+        if (first) RecState.reset()
+        RecState.mirror = true
+        RecState.running = true
+        RecState.countdown = o.optInt("countdown")
+        if (RecState.countdown > 0) {
+            vibrate("countdown")
+            if (first) openMirror()
+            return
+        }
+        RecState.mirrorElapsedMs = o.optLong("elapsedMs", o.optInt("elapsedSec") * 1000L)
+        RecState.mirrorRxAt = android.os.SystemClock.elapsedRealtime()
+        RecState.paused = o.optBoolean("paused")
+        RecState.autoPaused = o.optBoolean("autoPaused")
+        RecState.elapsedSec = o.optInt("elapsedSec")
+        RecState.distanceM = o.optDouble("distanceM", 0.0)
+        RecState.paceSecPerKm = o.optInt("paceSecPerKm")
+        RecState.hr = o.optInt("hr")
+        RecState.stepLabel = o.optString("stepLabel")
+        RecState.stepKind = o.optString("stepKind")
+        RecState.stepIndex = o.optInt("stepIndex")
+        RecState.stepTotal = o.optInt("stepTotal")
+        RecState.stepKindIndex = o.optInt("rep", 1)
+        RecState.stepKindTotal = o.optInt("reps", 1)
+        RecState.stepFraction = o.optDouble("fraction", 0.0).toFloat()
+        RecState.remainingSec = o.optInt("remainingSec")
+        RecState.stepRemainingM = o.optInt("remainingM")
+        RecState.stepTargetM = o.optInt("targetM")
+        RecState.nextStepLabel = o.optString("next")
+        RecState.targetZone = o.optInt("targetZone")
+        RecState.zoneStatus = o.optString("zoneStatus", "none")
+        o.optInt("maxHr").takeIf { it > 0 }?.let { RecState.maxHr = it }
+        if (first) openMirror()
+    }
+
+    /** Background activity launches are blocked, so raise the mirror screen through a
+     * full-screen notification (opens directly when the watch is idle; heads-up otherwise). */
+    private fun openMirror() {
+        val intent = Intent(this, RecordActivity::class.java)
+            .putExtra(RecordActivity.EXTRA_MIRROR, true)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        val pending = PendingIntent.getActivity(this, 4, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        val nm = getSystemService(NotificationManager::class.java)
+        val chanId = "aera_start"
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            nm.createNotificationChannel(NotificationChannel(chanId, "aera start run", NotificationManager.IMPORTANCE_HIGH))
+        }
+        nm.notify(
+            4,
+            NotificationCompat.Builder(this, chanId)
+                .setContentTitle("aera")
+                .setContentText("Phone run in progress")
+                .setSmallIcon(android.R.drawable.ic_menu_compass)
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setCategory(NotificationCompat.CATEGORY_WORKOUT)
+                .setFullScreenIntent(pending, true)
+                .setContentIntent(pending)
+                .setAutoCancel(true)
+                .build(),
+        )
+    }
+
     private fun replyBattery() {
         val bm = getSystemService(BATTERY_SERVICE) as? BatteryManager ?: return
         val pct = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
@@ -150,6 +239,7 @@ class PhoneListener : WearableListenerService() {
             "zone-high" -> longArrayOf(0, 150, 120, 150) // slow down: 2 short
             "zone-low" -> longArrayOf(0, 500) // speed up: 1 long
             "zone-back" -> longArrayOf(0, 40) // back in zone: 1 very short tick
+            "countdown" -> longArrayOf(0, 60)
             else -> longArrayOf(0, 180)
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

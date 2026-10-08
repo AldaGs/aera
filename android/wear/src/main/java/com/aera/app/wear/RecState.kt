@@ -6,6 +6,13 @@ package com.aera.app.wear
  */
 object RecState {
     @Volatile var running: Boolean = false
+    /** True while RecState is fed by a phone recording (/aera/live), not ExerciseService. */
+    @Volatile var mirror: Boolean = false
+    /** Mirror clock: phone's elapsed ms at receive time, extrapolated while running. */
+    @Volatile var mirrorElapsedMs: Long = 0L
+    @Volatile var mirrorRxAt: Long = 0L
+    /** Phone pre-start countdown seconds left (0 = none). */
+    @Volatile var countdown: Int = 0
     @Volatile var paused: Boolean = false
     @Volatile var autoPaused: Boolean = false
     @Volatile var elapsedSec: Int = 0
@@ -57,6 +64,10 @@ object RecState {
 
     fun reset() {
         running = false
+        mirror = false
+        mirrorElapsedMs = 0L
+        mirrorRxAt = 0L
+        countdown = 0
         paused = false
         autoPaused = false
         elapsedSec = 0

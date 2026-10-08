@@ -22,6 +22,7 @@ export async function startWatchSensors(): Promise<WatchSensors> {
   try {
     const { connected } = await WearBridge.isWatchConnected();
     if (!connected) return OFF;
+    WearBridge.startHr().catch(() => {});
 
     let bpm: number | null = null;
     let cad: number | null = null;

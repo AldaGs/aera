@@ -133,6 +133,13 @@ class WearBridgePlugin : Plugin() {
         call.resolve()
     }
 
+    /** ~1 Hz live stats for the watch's mirrored recording screen. */
+    @PluginMethod
+    fun sendLive(call: PluginCall) {
+        send("/aera/live", (call.getString("json") ?: "{}").toByteArray())
+        call.resolve()
+    }
+
     @PluginMethod
     fun sendCue(call: PluginCall) {
         send("/aera/cue", (call.getString("kind") ?: "").toByteArray())
@@ -142,6 +149,13 @@ class WearBridgePlugin : Plugin() {
     @PluginMethod
     fun stopWatch(call: PluginCall) {
         send("/aera/stop", ByteArray(0))
+        call.resolve()
+    }
+
+    /** Ask the watch to start streaming HR for a phone-recorded run. */
+    @PluginMethod
+    fun startHr(call: PluginCall) {
+        send("/aera/hrstart", ByteArray(0))
         call.resolve()
     }
 

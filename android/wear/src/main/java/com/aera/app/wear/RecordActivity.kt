@@ -7,6 +7,14 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
+import androidx.wear.compose.material.Text
 import android.view.KeyEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -35,13 +43,17 @@ class RecordActivity : ComponentActivity() {
     private val refresh = object : Runnable {
         override fun run() {
             if (RecState.running) sawRunning = true
+            if (RecState.mirror && !RecState.paused && RecState.countdown == 0 && RecState.mirrorRxAt > 0) {
+                // Extrapolate the phone clock between ~1 Hz messages so seconds flip in step.
+                RecState.elapsedSec = ((RecState.mirrorElapsedMs + SystemClock.elapsedRealtime() - RecState.mirrorRxAt) / 1000).toInt()
+            }
             if (sawRunning && !RecState.running && !RecState.paused && !RecState.summaryReady) {
                 // ExerciseService stopped itself without a summary (e.g. failed to start) — leave.
                 finish()
                 return
             }
             refreshTick++
-            handler.postDelayed(this, 500)
+            handler.postDelayed(this, if (RecState.mirror) 200 else 500)
         }
     }
 
@@ -51,6 +63,9 @@ class RecordActivity : ComponentActivity() {
             AeraTheme {
                 @Suppress("UNUSED_EXPRESSION") refreshTick // read to recompose on tick
                 when {
+                    RecState.mirror && RecState.countdown > 0 -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text("${RecState.countdown}", fontSize = 72.sp, fontWeight = FontWeight.Bold)
+                    }
                     RecState.summaryReady -> SummaryScreen(
                         sport = intent.getStringExtra(EXTRA_SPORT) ?: sportOf(intent.getStringExtra(EXTRA_PLAN_JSON)),
                         distanceM = RecState.sumDistanceM,
@@ -65,24 +80,34 @@ class RecordActivity : ComponentActivity() {
                         elapsedSec = RecState.elapsedSec,
                         distanceM = RecState.distanceM,
                         autoPaused = RecState.autoPaused,
-                        onLap = { ExerciseService.lapOrNext() },
-                        onResume = { ExerciseService.resume() },
-                        onEnd = { ExerciseService.stop() },
+                        onLap = { lap() },
+                        onResume = { ctl("resume") { ExerciseService.resume() } },
+                        onEnd = { ctl("stop") { ExerciseService.stop() } },
                     )
                     else -> LiveScreen(
                         data = LiveData.from(RecState),
                         lastLap = RecState.lastLap,
                         lastLapAtMs = RecState.lastLapAtMs,
-                        onPause = { ExerciseService.pause() },
+                        onPause = { ctl("pause") { ExerciseService.pause() } },
                     )
                 }
             }
         }
 
+        if (mirror) return // phone owns the recording; RecState is fed by PhoneListener
         val sport = intent.getStringExtra(EXTRA_SPORT) ?: "run"
         val planJson = intent.getStringExtra(EXTRA_PLAN_JSON)
         ensurePermissionsThenStart(sport, planJson)
     }
+
+    private val mirror get() = intent.getBooleanExtra(EXTRA_MIRROR, false)
+
+    /** Mirror mode forwards controls to the phone; standalone drives ExerciseService. */
+    private fun ctl(cmd: String, local: () -> Unit) {
+        if (mirror) Thread { WearCmd.send(this, cmd) }.start() else local()
+    }
+
+    private fun lap() = ctl("lap") { ExerciseService.lapOrNext() }
 
     /** Bottom key doubles as manual lap while recording — guarded per-device since not every
      * Wear OS watch exposes a KEYCODE_STEM_* for it; falls back to the on-screen Lap button. */
@@ -90,7 +115,7 @@ class RecordActivity : ComponentActivity() {
         if (RecState.running &&
             (keyCode == KeyEvent.KEYCODE_STEM_1 || keyCode == KeyEvent.KEYCODE_STEM_2 || keyCode == KeyEvent.KEYCODE_STEM_3)
         ) {
-            ExerciseService.lapOrNext()
+            lap()
             return true
         }
         return super.onKeyDown(keyCode, event)
@@ -141,6 +166,7 @@ class RecordActivity : ComponentActivity() {
     companion object {
         const val EXTRA_SPORT = "sport"
         const val EXTRA_PLAN_JSON = "planJson"
+        const val EXTRA_MIRROR = "mirror"
 
         val REQUIRED_PERMISSIONS: List<String> = buildList {
             add(Manifest.permission.BODY_SENSORS)

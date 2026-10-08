@@ -47,8 +47,12 @@ export interface WearBridgePlugin {
   }): Promise<void>;
   /** Buzz the watch on a transition (matches the phone's fireCue kinds). */
   sendCue(opts: { kind: string }): Promise<void>;
+  /** Live stats JSON for the watch's mirrored recording screen. */
+  sendLive(opts: { json: string }): Promise<void>;
   /** Tell the watch to stop measuring (run finished). */
   stopWatch(): Promise<void>;
+  /** Tell the watch to start streaming HR (phone-recorded run began). */
+  startHr(): Promise<void>;
   /** Write/replace the DataItem for one interval plan (JSON string). */
   putPlan(opts: { json: string }): Promise<void>;
   /** Read every plan DataItem currently synced (each a JSON string). */

@@ -10,11 +10,15 @@ import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import androidx.health.services.client.HealthServices
-import androidx.health.services.client.MeasureCallback
+import android.os.PowerManager
+import androidx.health.services.client.ExerciseUpdateCallback
 import androidx.health.services.client.data.Availability
-import androidx.health.services.client.data.DataPointContainer
+import androidx.health.services.client.data.BatchingMode
 import androidx.health.services.client.data.DataType
-import androidx.health.services.client.data.DeltaDataType
+import androidx.health.services.client.data.ExerciseConfig
+import androidx.health.services.client.data.ExerciseLapSummary
+import androidx.health.services.client.data.ExerciseType
+import androidx.health.services.client.data.ExerciseUpdate
 import androidx.wear.ongoing.OngoingActivity
 import androidx.wear.ongoing.Status
 import android.app.PendingIntent
@@ -27,35 +31,39 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 
 /**
- * Foreground service that reads live HR via Health Services `MeasureClient` and
- * streams each sample to the phone over the Data Layer (`/aera/hr`). Foreground +
- * ongoing notification keeps it sampling with the screen off.
+ * Foreground service that streams live HR/cadence to the phone (`/aera/hr`, `/aera/cadence`)
+ * during a phone-recorded run. Uses an ExerciseClient session (like Samsung Health), not
+ * MeasureClient: MeasureClient is for on-screen spot readings and gets throttled once the
+ * app leaves the foreground. HR batching is overridden to 5 s so screen-off updates keep
+ * flowing instead of arriving in multi-minute bursts.
  */
 class HrService : Service() {
 
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
-    private val measureClient by lazy { HealthServices.getClient(this).measureClient }
+    private val exerciseClient by lazy { HealthServices.getClient(this).exerciseClient }
+    private var wakeLock: PowerManager.WakeLock? = null
 
-    private val callback = object : MeasureCallback {
-        override fun onAvailabilityChanged(dataType: DeltaDataType<*, *>, availability: Availability) {
+    private val callback = object : ExerciseUpdateCallback {
+        override fun onRegistered() {}
+        override fun onRegistrationFailed(throwable: Throwable) {
+            Log.w("aera-wear", "HR registration failed: ${throwable.message}")
+        }
+        override fun onLapSummaryReceived(lapSummary: ExerciseLapSummary) {}
+        override fun onAvailabilityChanged(dataType: DataType<*, *>, availability: Availability) {
             Log.d("aera-wear", "HR availability: $availability")
         }
-        override fun onDataReceived(data: DataPointContainer) {
-            val hrPoint = data.getData(DataType.HEART_RATE_BPM).lastOrNull()
-            if (hrPoint != null) {
-                val rounded = hrPoint.value.toInt()
-                if (rounded > 0) {
-                    AeraState.hr = rounded
-                    sendData("/aera/hr", rounded)
-                }
+        override fun onExerciseUpdateReceived(update: ExerciseUpdate) {
+            if (update.exerciseStateInfo.state.isEnded) {
+                stopSelf()
+                return
             }
-
-            val cadPoint = data.getData(DataType.STEPS_PER_MINUTE).lastOrNull()
-            if (cadPoint != null) {
-                val roundedCad = cadPoint.value.toInt()
-                if (roundedCad > 0) {
-                    sendData("/aera/cadence", roundedCad)
-                }
+            val m = update.latestMetrics
+            m.getData(DataType.HEART_RATE_BPM).lastOrNull()?.value?.toInt()?.takeIf { it > 0 }?.let {
+                AeraState.hr = it
+                sendData("/aera/hr", it)
+            }
+            m.getData(DataType.STEPS_PER_MINUTE).lastOrNull()?.value?.toInt()?.takeIf { it > 0 }?.let {
+                sendData("/aera/cadence", it)
             }
         }
     }
@@ -64,8 +72,30 @@ class HrService : Service() {
         super.onCreate()
         startForegroundNotification()
         AeraState.measuring = true
-        measureClient.registerMeasureCallback(DataType.HEART_RATE_BPM, callback)
-        measureClient.registerMeasureCallback(DataType.STEPS_PER_MINUTE, callback)
+        wakeLock = (getSystemService(POWER_SERVICE) as PowerManager)
+            .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "aera:hr")
+            .apply { acquire(6 * 3600_000L) } // ponytail: 6 h cap, safety net if onDestroy never runs
+        scope.launch {
+            try {
+                val all = exerciseClient.getCapabilitiesAsync().get()
+                val caps = all.getExerciseTypeCapabilities(ExerciseType.RUNNING)
+                val types = setOf(DataType.HEART_RATE_BPM, DataType.STEPS_PER_MINUTE)
+                    .filter { it in caps.supportedDataTypes }.toSet()
+                val batching = setOf(BatchingMode.HEART_RATE_5_SECONDS)
+                    .filter { it in all.supportedBatchingModeOverrides }.toSet()
+                val config = ExerciseConfig.builder(ExerciseType.RUNNING)
+                    .setDataTypes(types)
+                    .setIsGpsEnabled(false)
+                    .setIsAutoPauseAndResumeEnabled(false)
+                    .setBatchingModeOverrides(batching)
+                    .build()
+                exerciseClient.setUpdateCallback(mainExecutor, callback)
+                exerciseClient.startExerciseAsync(config).get()
+            } catch (e: Exception) {
+                Log.w("aera-wear", "HR exercise start failed: ${e.message}")
+                stopSelf()
+            }
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
@@ -73,10 +103,11 @@ class HrService : Service() {
     override fun onDestroy() {
         AeraState.measuring = false
         try {
-            measureClient.unregisterMeasureCallbackAsync(DataType.HEART_RATE_BPM, callback)
-            measureClient.unregisterMeasureCallbackAsync(DataType.STEPS_PER_MINUTE, callback)
+            exerciseClient.clearUpdateCallbackAsync(callback)
+            exerciseClient.endExerciseAsync()
         } catch (_: Exception) {
         }
+        wakeLock?.takeIf { it.isHeld }?.release()
         scope.cancel()
         super.onDestroy()
     }
@@ -115,7 +146,7 @@ class HrService : Service() {
             .addTemplate("Tracking")
             .build()
             
-        val intent = Intent(this, MainActivity::class.java)
+        val intent = Intent(this, RecordActivity::class.java).putExtra(RecordActivity.EXTRA_MIRROR, true)
         val pendingIntent = PendingIntent.getActivity(
             this,
             0,
