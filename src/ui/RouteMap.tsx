@@ -73,7 +73,7 @@ export function RouteMap({
 }
 
 /** Drop points closer than `minPx` to the last kept one (GPS jitter, overdraw). */
-function thin(pts: [number, number][], minPx: number): [number, number][] {
+export function thin(pts: [number, number][], minPx: number): [number, number][] {
   const out: [number, number][] = [pts[0]];
   for (let i = 1; i < pts.length - 1; i++) {
     const [lx, ly] = out[out.length - 1];
@@ -84,7 +84,7 @@ function thin(pts: [number, number][], minPx: number): [number, number][] {
 }
 
 /** Catmull-Rom through the points as cubic Béziers → curves instead of corners. */
-function smoothPath(pts: [number, number][]): string {
+export function smoothPath(pts: [number, number][]): string {
   const f = (n: number) => n.toFixed(1);
   let d = `M${f(pts[0][0])} ${f(pts[0][1])}`;
   for (let i = 0; i < pts.length - 1; i++) {

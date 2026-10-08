@@ -2277,3 +2277,17 @@ body {
   font-size: 16px;
   font-weight: 500;
 }
+
+/* Recording countdowns (start + final seconds of a timed step). */
+.countdown-overlay {
+  position: fixed; inset: 0; z-index: 50; border: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;
+  background: color-mix(in srgb, var(--bg, #000) 88%, transparent); color: inherit;
+}
+.countdown-num { font-size: 120px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
+.countdown-toast {
+  position: fixed; left: 50%; top: 18%; transform: translateX(-50%); z-index: 40;
+  padding: 10px 18px; border-radius: 999px; font-weight: 600;
+  background: var(--accent); color: #fff;
+}
+.countdown-toast b { font-size: 1.4em; font-variant-numeric: tabular-nums; }

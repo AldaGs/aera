@@ -9,6 +9,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 import android.os.SystemClock
 import android.os.VibrationEffect
 import android.os.Vibrator
@@ -56,6 +57,9 @@ private const val TAG = "aera-wear"
  */
 class ExerciseService : Service() {
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+    // Screen off, the watch CPU sleeps between Health Services batches; holding it awake
+    // keeps GPS/HR arriving live instead of in multi-minute bursts.
+    private var wakeLock: PowerManager.WakeLock? = null
     private val exerciseClient by lazy { HealthServices.getClient(this).exerciseClient }
 
     private var runner: PlanRunner? = null
@@ -135,12 +139,16 @@ class ExerciseService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
+        wakeLock = (getSystemService(POWER_SERVICE) as PowerManager)
+            .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "aera:exercise")
+            .apply { acquire(6 * 3600_000L) } // ponytail: 6 h cap, safety net if onDestroy never runs
         beginExercise()
         return START_NOT_STICKY
     }
 
     override fun onDestroy() {
         instance = null
+        wakeLock?.takeIf { it.isHeld }?.release()
         try {
             exerciseClient.clearUpdateCallbackAsync(updateCallback)
         } catch (_: Exception) {

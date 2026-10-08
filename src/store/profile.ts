@@ -13,6 +13,8 @@ export interface Profile {
   maxHr: number | null; // for HR zones; null = estimate from age
   restingHr: number | null;
   units: Units;
+  startCountdownSec: number; // 0 = off
+  stepCountdownSec: number; // 0 = off; final seconds of a timed step
 }
 
 export interface Connectivity {
@@ -33,6 +35,8 @@ export const defaultProfile: Profile = {
   maxHr: null,
   restingHr: null,
   units: 'metric',
+  startCountdownSec: 0,
+  stepCountdownSec: 0,
 };
 
 export const defaultConnectivity: Connectivity = {

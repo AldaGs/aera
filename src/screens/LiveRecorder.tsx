@@ -71,6 +71,22 @@ export function LiveRecorder({
   const [finishArmed, setFinishArmed] = useState(false);
   const finishTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const maxHr = effectiveMaxHr(loadProfile());
+  const countdownCfg = useRef({ start: loadProfile().startCountdownSec, step: loadProfile().stepCountdownSec }).current;
+  // Pre-start countdown: GPS/HR warm up meanwhile; the engine ignores fixes until start().
+  const [startCd, setStartCd] = useState<number | null>(null);
+  useEffect(() => {
+    if (startCd == null) return;
+    if (startCd <= 0) {
+      engineRef.current.start();
+      void fireCue(stats?.plan?.kind ?? 'run');
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      setStartCd(null);
+      return;
+    }
+    void fireCue('countdown');
+    const t = setTimeout(() => setStartCd((c) => (c == null ? c : c - 1)), 1000);
+    return () => clearTimeout(t);
+  }, [startCd]);
   const [zoneBanner, setZoneBanner] = useState<'high' | 'low' | null>(null);
   const zoneBannerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -85,7 +101,10 @@ export function LiveRecorder({
       }
     };
     const unsub = engine.subscribe(setStats);
-    if (engine.status === 'idle') engine.start();
+    if (engine.status === 'idle') {
+      if (countdownCfg.start > 0) setStartCd(countdownCfg.start);
+      else engine.start();
+    }
 
     let active = true;
     startLocationUpdates(
@@ -152,6 +171,16 @@ export function LiveRecorder({
   const usesPace = sport === 'run' || sport === 'walk';
   const plan = stats?.plan;
   const points = stats?.points ?? [];
+  // ponytail: time-based remaining only; distance steps would need a pace estimate.
+  const stepCd =
+    countdownCfg.step > 0 && plan && !plan.complete && plan.next && stats?.status === 'recording' &&
+    !stats.autoPaused && plan.remainingUnit === 'sec' && plan.remaining != null &&
+    plan.remaining > 0 && plan.remaining <= countdownCfg.step
+      ? Math.ceil(plan.remaining)
+      : null;
+  useEffect(() => {
+    if (stepCd != null) void fireCue('countdown');
+  }, [stepCd]);
   const liveHr = stats?.liveHr ?? null;
   const targetHrZone = stats?.targetHrZone ?? null;
   const hrZoneStatus = stats?.hrZoneStatus ?? 'none';
@@ -299,6 +328,17 @@ export function LiveRecorder({
         </button>
       </div>
       {finishArmed && !saving && <p className="muted small center rec-finish-hint">Tap again to finish</p>}
+      {startCd != null && startCd > 0 && (
+        <button className="countdown-overlay" onClick={() => setStartCd(0)} aria-label="Start now">
+          <span className="countdown-num">{startCd}</span>
+          <span className="muted small">Tap to start now</span>
+        </button>
+      )}
+      {stepCd != null && (
+        <div className="countdown-toast">
+          {plan?.next} in <b>{stepCd}</b>
+        </div>
+      )}
     </div>
   );
 }

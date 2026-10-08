@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { X, User, Barbell, Ruler, Heart, Calendar, Watch, Gear, Pulse, ArrowsClockwise } from '@phosphor-icons/react';
+import { X, User, Barbell, Ruler, Heart, Calendar, Watch, Gear, Pulse, ArrowsClockwise, Timer } from '@phosphor-icons/react';
 import {
   loadProfile,
   saveProfile,
@@ -157,6 +157,26 @@ export function Profile({ onClose }: { onClose: () => void }) {
                 </button>
               ))}
             </div>
+          </Field>
+          <Field icon={Timer} label="Start countdown (s)">
+            <input
+              type="number"
+              inputMode="numeric"
+              min={0}
+              value={p.startCountdownSec || ''}
+              onChange={(e) => update('startCountdownSec', Math.max(0, Math.round(numOrNull(e.target.value) ?? 0)))}
+              placeholder="Off"
+            />
+          </Field>
+          <Field icon={Timer} label="Step countdown (s)">
+            <input
+              type="number"
+              inputMode="numeric"
+              min={0}
+              value={p.stepCountdownSec || ''}
+              onChange={(e) => update('stepCountdownSec', Math.max(0, Math.round(numOrNull(e.target.value) ?? 0)))}
+              placeholder="Off"
+            />
           </Field>
           <Field icon={ArrowsClockwise} label="Recalculate metrics">
             <button className="btn-sm" onClick={recalcMetrics} disabled={recalc != null}>

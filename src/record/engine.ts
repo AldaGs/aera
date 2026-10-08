@@ -173,6 +173,7 @@ export class RecordingEngine {
   private stepStartDist = 0;
   private lapMeta: LapMeta[] = []; // one per lapStartsMs boundary
   private planComplete = false;
+  private gpsGap = false; // next fix starts a fresh segment (no distance across the gap)
   /** Fired on each step transition (entering `kind`, 'done' at plan end, or a
    * zone-guard event). */
   onCue: ((kind: CueKind) => void) | null = null;
@@ -249,8 +250,18 @@ export class RecordingEngine {
       return;
     }
 
+    // Warm-up steps (time/manual targets) ignore GPS — jogging around before the
+    // session just adds noise. Distance warm-ups still need it to advance.
+    const step = this.plan && !this.planComplete ? this.plan[this.stepIndex] : null;
+    if (step?.kind === 'warmup' && (step.target.type === 'time' || step.target.type === 'manual')) {
+      this.gpsGap = true;
+      this.emit();
+      return;
+    }
+
     const now = s.ts;
-    const prev = this.points[this.points.length - 1];
+    const prev = this.gpsGap ? undefined : this.points[this.points.length - 1];
+    this.gpsGap = false;
 
     if (prev) {
       const segDist = haversine(prev.lat, prev.lng, s.lat, s.lng);

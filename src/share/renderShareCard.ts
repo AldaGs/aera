@@ -1,4 +1,5 @@
 import type { Workout } from '@/model/workout';
+import { smoothPath, thin } from '@/ui/RouteMap';
 import { fmtDistance, fmtDuration, fmtPace, fmtSpeed } from '@/format';
 
 export type Template = 'story' | 'square' | 'poster';
@@ -21,6 +22,14 @@ const ACCENT_2 = '#2f8fff';
 
 function esc(s: string): string {
   return s.replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' })[c]!);
+}
+
+/** Full GPS track (falls back to the 48-point preview, which looked chunky on cards). */
+function routeOf(w: Workout): [number, number][] {
+  const full = (w.track ?? [])
+    .filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng) && (p.lat !== 0 || p.lng !== 0))
+    .map((p) => [p.lat, p.lng] as [number, number]);
+  return full.length >= 2 ? full : w.summary.routePreview;
 }
 
 /** Project a [lat,lng] path into a box, latitude-corrected, aspect-preserving. */
@@ -95,10 +104,8 @@ export function renderShareCard(
   // Route path.
   let routeSvg = '';
   if (s.routePreview.length >= 2 && s.bounds) {
-    const pts = projectPath(s.routePreview, s.bounds, mapBox, 90);
-    const d = pts
-      .map(([x, y], i) => `${i ? 'L' : 'M'}${x.toFixed(1)} ${y.toFixed(1)}`)
-      .join(' ');
+    const pts = thin(projectPath(routeOf(w), s.bounds, mapBox, 90), 3);
+    const d = smoothPath(pts);
     const [sx, sy] = pts[0];
     const [ex, ey] = pts[pts.length - 1];
     routeSvg = `
@@ -192,10 +199,8 @@ function renderPoster(w: Workout, spec: TemplateSpec, athleteName: string): stri
 
   let routeSvg = '';
   if (s.routePreview.length >= 2 && s.bounds) {
-    const pts = projectPath(s.routePreview, s.bounds, mapBox, 40);
-    const d = pts
-      .map(([x, y], i) => `${i ? 'L' : 'M'}${x.toFixed(1)} ${y.toFixed(1)}`)
-      .join(' ');
+    const pts = thin(projectPath(routeOf(w), s.bounds, mapBox, 40), 3);
+    const d = smoothPath(pts);
     const [ex, ey] = pts[pts.length - 1];
     routeSvg = `
       <path d="${d}" fill="none" stroke="url(#route)" stroke-width="14"

@@ -5,7 +5,7 @@ import type { StepKind } from '@/model/intervalPlan';
 
 /** A transition cue kind — the step you're entering, 'done' at plan end, or an HR
  * zone-guard event (see src/record/zoneGuard.ts). */
-export type CueKind = StepKind | 'done' | 'zone-high' | 'zone-low' | 'zone-back';
+export type CueKind = StepKind | 'done' | 'zone-high' | 'zone-low' | 'zone-back' | 'countdown';
 
 /**
  * Fire a transition cue. Phone haptics via @capacitor/haptics, with a distinct
@@ -16,6 +16,11 @@ export type CueKind = StepKind | 'done' | 'zone-high' | 'zone-low' | 'zone-back'
  */
 export async function fireCue(kind: CueKind): Promise<void> {
   if (!Capacitor.isNativePlatform()) return;
+  if (kind === 'countdown') {
+    // Phone-only tick (the watch doesn't know this kind).
+    await Haptics.impact({ style: ImpactStyle.Light }).catch(() => {});
+    return;
+  }
   // Buzz the watch too (no-op when no companion is connected).
   WearBridge.sendCue({ kind }).catch(() => {});
   try {

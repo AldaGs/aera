@@ -13,6 +13,7 @@ public class MainActivity extends BridgeActivity {
         // Register our app-local plugins before the bridge starts.
         registerPlugin(SamsungHealthPlugin.class);
         registerPlugin(WearBridgePlugin.class);
+        registerPlugin(KeepAwakePlugin.class);
         super.onCreate(savedInstanceState);
 
         // targetSdk 35+ forces edge-to-edge on Android 15, so the content draws

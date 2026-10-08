@@ -48,6 +48,9 @@ interface BackgroundGeolocationPlugin {
 const BackgroundGeolocation =
   registerPlugin<BackgroundGeolocationPlugin>('BackgroundGeolocation');
 
+// App-local: partial wake lock so Doze doesn't stall fixes with the screen off.
+const KeepAwake = registerPlugin<{ start(): Promise<void>; stop(): Promise<void> }>('KeepAwake');
+
 /**
  * Start streaming location fixes. On device this spins up a foreground service
  * (survives lock/background); on the web it falls back to the browser's
@@ -58,6 +61,7 @@ export async function startLocationUpdates(
   onError?: (message: string) => void,
 ): Promise<LocationWatcher> {
   if (Capacitor.isNativePlatform()) {
+    await KeepAwake.start().catch(() => {});
     const id = await BackgroundGeolocation.addWatcher(
       {
         backgroundMessage: 'Recording your workout',
@@ -82,7 +86,12 @@ export async function startLocationUpdates(
         });
       },
     );
-    return { stop: () => BackgroundGeolocation.removeWatcher({ id }) };
+    return {
+      stop: async () => {
+        await KeepAwake.stop().catch(() => {});
+        await BackgroundGeolocation.removeWatcher({ id });
+      },
+    };
   }
 
   // Web fallback.
