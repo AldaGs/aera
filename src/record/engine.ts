@@ -314,6 +314,8 @@ export class RecordingEngine {
     const step = this.plan && !this.planComplete ? this.plan[this.stepIndex] : null;
     if (step?.kind === 'warmup' && (step.target.type === 'time' || step.target.type === 'manual')) {
       this.gpsGap = true;
+      this.sampleHr();
+      this.checkPlanAdvance();
       this.emit();
       return;
     }
@@ -468,6 +470,18 @@ export class RecordingEngine {
     this.checkZoneGuard();
     this.maybePersist(); // keeps HR-only stretches (no fixes) crash-safe too
     this.emit();
+  }
+
+  /**
+   * A fresh HR reading arrived from the watch. Drives HR sampling and timed plan
+   * steps while the phone is locked: the WebView throttles the 1 s ticker then,
+   * but plugin events (HR ~1/s, GPS fixes) are still delivered.
+   */
+  onHrEvent(): void {
+    if (this.status !== 'recording') return;
+    this.sampleHr();
+    this.checkPlanAdvance();
+    this.maybePersist();
   }
 
   /** Record HR every tick from session start, whether or not GPS has a fix. */

@@ -23,6 +23,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
+import androidx.wear.ambient.AmbientLifecycleObserver
 import com.aera.app.wear.ui.theme.AeraTheme
 import org.json.JSONObject
 
@@ -39,6 +40,24 @@ class RecordActivity : ComponentActivity() {
     // Only leave once a recording has actually run: before the service starts (or
     // while the permission prompt is up) RecState.running is still false.
     private var sawRunning = false
+    // Always-on: when the display times out, Wear OS sends a plain activity to the
+    // background and wakes to the watch face. Declaring ambient support keeps this
+    // screen on top (dimmed) for the whole run, like the system workout app.
+    private var ambient = false
+    private val ambientCallback = object : AmbientLifecycleObserver.AmbientLifecycleCallback {
+        override fun onEnterAmbient(ambientDetails: AmbientLifecycleObserver.AmbientDetails) {
+            ambient = true
+        }
+
+        override fun onExitAmbient() {
+            ambient = false
+            refreshTick++
+        }
+
+        override fun onUpdateAmbient() {
+            refreshTick++ // ~1/min system tick while dimmed
+        }
+    }
 
     private val refresh = object : Runnable {
         override fun run() {
@@ -53,12 +72,14 @@ class RecordActivity : ComponentActivity() {
                 return
             }
             refreshTick++
-            handler.postDelayed(this, if (RecState.mirror) 200 else 500)
+            // Ambient keeps the activity resumed; slow the poll to save battery.
+            handler.postDelayed(this, if (ambient) 1000 else if (RecState.mirror) 200 else 500)
         }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        lifecycle.addObserver(AmbientLifecycleObserver(this, ambientCallback))
         setContent {
             AeraTheme {
                 @Suppress("UNUSED_EXPRESSION") refreshTick // read to recompose on tick

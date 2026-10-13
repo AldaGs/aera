@@ -35,9 +35,12 @@ class WearBridgePlugin : Plugin() {
 
     companion object {
         @Volatile private var instance: WearBridgePlugin? = null
+        // Latest watch HR, for the native live relay (see [LiveRelay]).
+        @Volatile private var liveHr: Int = 0
 
         /** Called from [WearMessageListener] when an `/aera/hr` message arrives. */
         fun emitHr(bpm: Int) {
+            liveHr = bpm
             val p = instance ?: return
             val data = JSObject()
             data.put("bpm", bpm)
@@ -89,8 +92,62 @@ class WearBridgePlugin : Plugin() {
     }
 
     override fun handleOnDestroy() {
+        relay.stop()
         if (instance === this) instance = null
     }
+
+    /**
+     * Keeps the watch's mirror screen fed at 1 Hz from native code. With the phone
+     * locked, the WebView's timers are throttled (Chromium cuts hidden-page timers
+     * to about once a minute), so JS-driven `/aera/live` messages dry up even though
+     * recording continues. JS still pushes a fresh snapshot whenever it runs (GPS
+     * fixes and HR events still reach it); between snapshots this re-sends the
+     * last one with the clock and step countdown advanced and the latest HR.
+     */
+    private inner class LiveRelay {
+        private var exec: java.util.concurrent.ScheduledExecutorService? = null
+        @Volatile private var last: JSONObject? = null
+        @Volatile private var lastAt = 0L // elapsedRealtime of `last`
+        @Volatile private var lastSentAt = 0L
+
+        @Synchronized fun update(json: String) {
+            last = try { JSONObject(json) } catch (e: Exception) { return }
+            lastAt = android.os.SystemClock.elapsedRealtime()
+            lastSentAt = lastAt
+            send("/aera/live", json.toByteArray())
+            if (exec == null) {
+                exec = java.util.concurrent.Executors.newSingleThreadScheduledExecutor().also {
+                    it.scheduleAtFixedRate({ tick() }, 1, 1, java.util.concurrent.TimeUnit.SECONDS)
+                }
+            }
+        }
+
+        private fun tick() {
+            val base = last ?: return
+            val now = android.os.SystemClock.elapsedRealtime()
+            if (now - lastSentAt < 900) return // JS is keeping up on its own
+            if (base.optInt("countdown") > 0) return
+            val o = JSONObject(base.toString())
+            if (!o.optBoolean("paused")) {
+                val dt = now - lastAt
+                val ms = o.optLong("elapsedMs") + dt
+                o.put("elapsedMs", ms).put("elapsedSec", ms / 1000)
+                val rem = o.optInt("remainingSec")
+                if (rem > 0) o.put("remainingSec", maxOf(0L, rem - dt / 1000))
+            }
+            if (liveHr > 0) o.put("hr", liveHr)
+            lastSentAt = now
+            send("/aera/live", o.toString().toByteArray())
+        }
+
+        @Synchronized fun stop() {
+            exec?.shutdownNow()
+            exec = null
+            last = null
+        }
+    }
+
+    private val relay = LiveRelay()
 
     /** Fire-and-forget send of a message to every connected node (off the UI thread). */
     private fun send(path: String, payload: ByteArray) {
@@ -136,7 +193,7 @@ class WearBridgePlugin : Plugin() {
     /** ~1 Hz live stats for the watch's mirrored recording screen. */
     @PluginMethod
     fun sendLive(call: PluginCall) {
-        send("/aera/live", (call.getString("json") ?: "{}").toByteArray())
+        relay.update(call.getString("json") ?: "{}")
         call.resolve()
     }
 
@@ -148,6 +205,7 @@ class WearBridgePlugin : Plugin() {
 
     @PluginMethod
     fun stopWatch(call: PluginCall) {
+        relay.stop()
         send("/aera/stop", ByteArray(0))
         call.resolve()
     }

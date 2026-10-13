@@ -63,6 +63,9 @@ dependencies {
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1'
     // Ongoing Activity for persistence.
     implementation 'androidx.wear:wear-ongoing:1.0.0'
+    // AmbientLifecycleObserver: keep the record screen up (always-on) instead of
+    // dropping to the watch face when the display times out mid-run.
+    implementation 'androidx.wear:wear:1.3.0'
     testImplementation 'junit:junit:4.13.2'
     // Real org.json impl for JVM unit tests — the Android stub jar throws
     // "not mocked" on JSONObject.put, and PlanRunnerTest builds JSON fixtures.
