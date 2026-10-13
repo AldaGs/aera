@@ -2,7 +2,7 @@ import { Capacitor } from '@capacitor/core';
 import { Health, type HealthPermission } from 'capacitor-health';
 import type { Workout } from '@/model/workout';
 import { existingExternalIds, saveWorkout } from '@/db/db';
-import { effectiveMaxHr, loadProfile } from '@/store/profile';
+import { deriveOptions, loadProfile } from '@/store/profile';
 import { externalKey, mapHealthWorkout, type HealthWorkout } from './mapWorkout';
 
 // Read permissions we need for run/ride sessions with route + HR.
@@ -80,7 +80,7 @@ export async function importFromHealthConnect(days = 90): Promise<ImportResult> 
   const raw = (res.workouts ?? []) as unknown as HealthWorkout[];
   const seen = await existingExternalIds();
 
-  const maxHr = effectiveMaxHr(loadProfile());
+  const { maxHr, zoneBounds } = deriveOptions(loadProfile());
 
   let imported = 0;
   let skippedDup = 0;
@@ -98,7 +98,7 @@ export async function importFromHealthConnect(days = 90): Promise<ImportResult> 
       skippedDup++;
       continue;
     }
-    const mapped: Workout | null = mapHealthWorkout(hw, { athleteId: 'me', maxHr });
+    const mapped: Workout | null = mapHealthWorkout(hw, { athleteId: 'me', maxHr, zoneBounds });
     if (!mapped) {
       skippedUnsupported++;
       continue;

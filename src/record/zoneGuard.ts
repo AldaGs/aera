@@ -39,7 +39,7 @@ export class ZoneGuard {
    * but nothing fires (caller should `reset()` on an actual step/target change).
    * Returns the event to fire, if any.
    */
-  sample(nowMs: number, hr: number | null, targetZone: HrZone | null, maxHr: number | null, paused = false): ZoneEvent | null {
+  sample(nowMs: number, hr: number | null, targetZone: HrZone | null, maxHr: number | readonly number[] | null, paused = false): ZoneEvent | null {
     if (paused) {
       // Pause time must not count as out-of-zone time (resume would alert at once).
       this.outSinceMs = null;

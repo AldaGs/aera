@@ -8,17 +8,16 @@ import { WearBridge } from '@/plugins/wearHr';
 import { startLocationUpdates, type LocationWatcher } from '@/record/location';
 import { syncPlans, getLastSyncAt } from '@/sync/planSync';
 import { fmtSec, parseSec } from '@/screens/IntervalBuilder';
-import { effectiveMaxHr, loadProfile } from '@/store/profile';
+import { loadProfile, zoneModel, type ZoneModel } from '@/store/profile';
 
 const ZONE_NAMES: Record<HrZone, string> = { 1: 'Easy', 2: 'Endurance', 3: 'Tempo', 4: 'Threshold', 5: 'Max' };
-// Same 5-zone % bands as hrZoneIndex (src/metrics/deriveSummary.ts): <60/<70/<80/<90/>=90% of max HR.
-const ZONE_BOUNDS: Record<HrZone, [number, number]> = { 1: [0, 0.6], 2: [0.6, 0.7], 3: [0.7, 0.8], 4: [0.8, 0.9], 5: [0.9, 1.1] };
-function zoneBpmLabel(z: HrZone, maxHr: number | null): string {
-  if (!maxHr) return `Z${z} · ${ZONE_NAMES[z]}`;
-  const [lo, hi] = ZONE_BOUNDS[z];
-  const loBpm = Math.round(maxHr * lo);
-  const hiBpm = z === 5 ? Math.round(maxHr) : Math.round(maxHr * hi);
-  return `Z${z} · ${ZONE_NAMES[z]} · ${loBpm}–${hiBpm} bpm`;
+// Bounds come from the profile's zone model (% of max HR, or AT/AnT thresholds).
+function zoneBpmLabel(z: HrZone, zones: ZoneModel | null): string {
+  if (!zones) return `Z${z} · ${ZONE_NAMES[z]}`;
+  const b = zones.boundaries;
+  if (z === 1) return `Z1 · ${ZONE_NAMES[1]} · <${b[0]} bpm`;
+  if (z === 5) return `Z5 · ${ZONE_NAMES[5]} · ${b[3]}+ bpm`;
+  return `Z${z} · ${ZONE_NAMES[z]} · ${b[z - 2]}–${b[z - 1]} bpm`;
 }
 
 type GoalType = 'none' | 'time' | 'distance' | 'either';
@@ -244,7 +243,7 @@ export function StartSheet({
         {selectedPlan ? (
           <span className="muted small">
             {selectedPlan.hrZone
-              ? zoneBpmLabel(selectedPlan.hrZone, effectiveMaxHr(loadProfile()))
+              ? zoneBpmLabel(selectedPlan.hrZone, zoneModel(loadProfile()))
               : 'No zone target set on this plan'}
           </span>
         ) : (
@@ -258,7 +257,7 @@ export function StartSheet({
                 className={`tag ${hrZone === z ? 'tag-accent' : 'tag-neutral'}`}
                 onClick={() => onHrZoneChange(z)}
               >
-                {zoneBpmLabel(z, effectiveMaxHr(loadProfile()))}
+                {zoneBpmLabel(z, zoneModel(loadProfile()))}
               </button>
             ))}
           </div>

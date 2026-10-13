@@ -5,6 +5,8 @@ import {
   saveProfile,
   loadConnectivity,
   effectiveMaxHr,
+  deriveOptions,
+  type HrZoneMethod,
   type Profile as ProfileData,
   type Units,
 } from '@/store/profile';
@@ -29,11 +31,7 @@ export function Profile({ onClose }: { onClose: () => void }) {
   async function recalcMetrics() {
     setRecalc('Recalculating…');
     try {
-      const n = await rederiveAll({
-        maxHr: effectiveMaxHr(p),
-        restingHr: p.restingHr,
-        weightKg: p.weightKg,
-      });
+      const n = await rederiveAll(deriveOptions(p));
       setRecalc(`Updated ${n} activities`);
     } catch {
       setRecalc('Failed');
@@ -109,10 +107,17 @@ export function Profile({ onClose }: { onClose: () => void }) {
               type="number"
               inputMode="numeric"
               value={p.maxHr ?? ''}
-              onChange={(e) => update('maxHr', numOrNull(e.target.value))}
+              onChange={(e) => {
+                const next = { ...p, maxHr: numOrNull(e.target.value), maxHrAuto: false };
+                setP(next);
+                saveProfile(next);
+              }}
               placeholder={maxHr ? `${maxHr} (est.)` : 'auto'}
             />
           </Field>
+          {p.maxHrAuto && p.maxHr && (
+            <p className="muted small">Raised automatically to the highest HR you've held for 10 s.</p>
+          )}
           <Field icon={Pulse} label="Resting HR">
             <input
               type="number"
@@ -122,6 +127,41 @@ export function Profile({ onClose }: { onClose: () => void }) {
               placeholder="—"
             />
           </Field>
+          <Field icon={Heart} label="Zones">
+            <div className="seg">
+              {(['pct_max_hr', 'thresholds'] as HrZoneMethod[]).map((m) => (
+                <button
+                  key={m}
+                  className={`seg-opt ${p.hrZoneMethod === m ? 'seg-opt-active' : ''}`}
+                  onClick={() => update('hrZoneMethod', m)}
+                >
+                  {m === 'pct_max_hr' ? '% max' : 'AT/AnT'}
+                </button>
+              ))}
+            </div>
+          </Field>
+          {p.hrZoneMethod === 'thresholds' && (
+            <>
+              <Field icon={Pulse} label="Aerobic threshold (AT)">
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  value={p.aerobicThresholdHr ?? ''}
+                  onChange={(e) => update('aerobicThresholdHr', numOrNull(e.target.value))}
+                  placeholder="e.g. 141"
+                />
+              </Field>
+              <Field icon={Pulse} label="Anaerobic threshold (AnT)">
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  value={p.anaerobicThresholdHr ?? ''}
+                  onChange={(e) => update('anaerobicThresholdHr', numOrNull(e.target.value))}
+                  placeholder="e.g. 174"
+                />
+              </Field>
+            </>
+          )}
         </Section>
 
         <Section title="Connectivity" icon={Watch}>

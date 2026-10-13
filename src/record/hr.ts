@@ -6,6 +6,9 @@ export interface WatchSensors {
   connected: boolean;
   latestHr: () => number | null;
   latestCadence: () => number | null;
+  /** Called on every HR message. Plugin events still reach JS while the phone is
+   * locked, unlike timers (Chromium throttles hidden-page timers to ~1/min). */
+  onHr?: (bpm: number) => void;
   stop: () => Promise<void>;
 }
 
@@ -29,9 +32,16 @@ export async function startWatchSensors(): Promise<WatchSensors> {
     let lastHrAt = 0;
     let lastCadAt = 0;
     
+    const sensors: WatchSensors = {
+      connected: true,
+      latestHr: () => (Date.now() - lastHrAt < 8000 ? bpm : null),
+      latestCadence: () => (Date.now() - lastCadAt < 8000 ? cad : null),
+      stop: async () => {},
+    };
     const handleHr = await WearBridge.addListener('hr', (e) => {
       bpm = e.bpm;
       lastHrAt = Date.now();
+      sensors.onHr?.(e.bpm);
     });
     
     const handleCad = await WearBridge.addListener('cadence', (e) => {
@@ -39,11 +49,7 @@ export async function startWatchSensors(): Promise<WatchSensors> {
       lastCadAt = Date.now();
     });
 
-    return {
-      connected: true,
-      latestHr: () => (Date.now() - lastHrAt < 8000 ? bpm : null),
-      latestCadence: () => (Date.now() - lastCadAt < 8000 ? cad : null),
-      stop: async () => {
+    sensors.stop = async () => {
         await handleHr.remove();
         await handleCad.remove();
         try {
@@ -51,8 +57,8 @@ export async function startWatchSensors(): Promise<WatchSensors> {
         } catch {
           // watch already gone — nothing to stop
         }
-      },
     };
+    return sensors;
   } catch {
     return OFF;
   }

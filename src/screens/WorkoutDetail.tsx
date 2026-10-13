@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { X, ShareNetwork, Mountains, Heart, Timer, Gauge, MapPin, Fire, Trash, Lightning, Pulse, SneakerMove, Repeat, TrendUp, DownloadSimple } from '@phosphor-icons/react';
 import { exportWorkoutJson } from '@/share/exportJson';
 import { getWorkout, deleteWorkout } from '@/db/db';
-import type { Lap, Sport, Workout } from '@/model/workout';
+import type { Lap, LapType, Workout } from '@/model/workout';
 import { RouteMap } from '@/ui/RouteMap';
 import { SPORT_ICON } from '@/ui/SportIcon';
 import { TrackChart, type ChartPoint } from '@/ui/TrackChart';
@@ -399,7 +399,9 @@ function ChartPanel({
   );
 }
 
-const LAP_LABEL: Record<Sport | 'rest', string> = {
+const LAP_LABEL: Record<LapType, string> = {
+  warmup: 'Warm-up',
+  cooldown: 'Cool-down',
   run: 'Run',
   walk: 'Walk',
   ride: 'Ride',

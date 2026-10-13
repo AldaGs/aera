@@ -229,6 +229,7 @@ function buildFromRoute(
 export interface MapOptions {
   athleteId?: string;
   maxHr?: number | null;
+  zoneBounds?: number[] | null;
   restingHr?: number | null;
   weightKg?: number | null;
 }
@@ -324,6 +325,7 @@ export function mapHealthWorkout(
 
   const summary = deriveSummary(track, sport, {
     maxHr: opts.maxHr,
+    zoneBounds: opts.zoneBounds,
     restingHr: opts.restingHr,
     weightKg: opts.weightKg,
   });

@@ -23,7 +23,19 @@ export interface DeriveOptions {
   maxHr?: number | null; // enables HR-zone breakdown when provided
   restingHr?: number | null; // enables TRIMP training-load when provided with maxHr
   weightKg?: number | null; // enables the calorie estimate (defaults to 70)
+  /** HR zone boundaries (bpm, 4 values); overrides the % of maxHr bands. */
+  zoneBounds?: number[] | null;
+  /** Session clock from the recorder: wall time start→finish and moving time
+   * (elapsed minus manual/auto pauses). Overrides the track-derived values. */
+  timeline?: { elapsedSec: number; movingSec: number } | null;
 }
+
+/** A fix-to-fix gap longer than this is a GPS gap: no distance is drawn across it. */
+export const GPS_GAP_MS = 15000;
+/** Laps/splits shorter than this have no meaningful pace. */
+export const MIN_PACE_DISTANCE_M = 50;
+/** Laps shorter than this are artefacts (e.g. a stop tap right after a lap tap). */
+export const MIN_LAP_SEC = 2;
 
 function toRad(deg: number): number {
   return (deg * Math.PI) / 180;
@@ -81,12 +93,19 @@ function gradeCostFactor(grade: number): number {
   return cr / 3.6; // 3.6 J/kg/m is the flat cost
 }
 
-/** Five-zone model by percentage of max HR: Z1<60, Z2<70, Z3<80, Z4<90, Z5≥90. */
 /** Fastest plausible speed per sport (m/s); anything faster is a GPS teleport. */
 export const MAX_SPEED_MS: Record<Sport, number> = { run: 12, walk: 5, ride: 25 };
 
-export function hrZoneIndex(hr: number, maxHr: number): number {
-  const pct = hr / maxHr;
+/**
+ * 0-based HR zone. Pass explicit bpm boundaries (Z1 < b[0] ≤ Z2 < … ≤ Z5), or a
+ * max HR for the default % bands: Z1<60, Z2<70, Z3<80, Z4<90, Z5≥90.
+ */
+export function hrZoneIndex(hr: number, maxHrOrBounds: number | readonly number[]): number {
+  if (typeof maxHrOrBounds !== 'number') {
+    const i = maxHrOrBounds.findIndex((b) => hr < b);
+    return i < 0 ? 4 : i;
+  }
+  const pct = hr / maxHrOrBounds;
   if (pct < 0.6) return 0;
   if (pct < 0.7) return 1;
   if (pct < 0.8) return 2;
@@ -172,6 +191,43 @@ export function segmentDistance(prev: TrackPoint, cur: TrackPoint): number {
   return gps < 1 && speedDist > 0 ? speedDist : gps;
 }
 
+export interface GpsGap {
+  startMs: number;
+  endMs: number;
+}
+
+/**
+ * Distance for each segment (index i = track[i-1] → track[i]), measured
+ * fix-to-fix. HR-only points (`noFix`) add nothing; a jump across a time gap
+ * longer than GPS_GAP_MS (screen-off, signal loss, skipped warm-up GPS) or
+ * faster than the sport allows counts as zero instead of a straight line.
+ */
+export function segmentDistances(
+  track: TrackPoint[],
+  sport: Sport,
+): { dist: number[]; gaps: GpsGap[] } {
+  const dist = new Array<number>(track.length).fill(0);
+  const gaps: GpsGap[] = [];
+  let lastFix = -1;
+  for (let i = 0; i < track.length; i++) {
+    const cur = track[i];
+    if (cur.noFix) continue;
+    if (lastFix >= 0) {
+      const prev = track[lastFix];
+      const dtMs = cur.t - prev.t;
+      if (dtMs > GPS_GAP_MS) {
+        gaps.push({ startMs: prev.t, endMs: cur.t });
+      } else {
+        const d = segmentDistance(prev, cur);
+        if (dtMs > 0 && d / (dtMs / 1000) > MAX_SPEED_MS[sport]) continue; // teleport: keep the old anchor
+        dist[i] = d;
+      }
+    }
+    lastFix = i;
+  }
+  return { dist, gaps };
+}
+
 /** Per-point smoothed ground speed (m/s), index-aligned to the track. */
 export function speedSeries(track: TrackPoint[]): number[] {
   const raw: (number | null)[] = track.map((p, i) => {
@@ -207,7 +263,7 @@ function classify(speed: number, sport: Sport): Sport | 'rest' {
  * there's no real interval structure (single class throughout). This is the
  * fallback when the platform doesn't hand us explicit laps.
  */
-function deriveLaps(track: TrackPoint[], sport: Sport, speeds: number[]): Lap[] {
+function deriveLaps(track: TrackPoint[], sport: Sport, speeds: number[], segDist: number[]): Lap[] {
   const MIN_LAP_SEC = 20;
   type Grp = { cls: Sport | 'rest'; from: number; to: number };
   const groups: Grp[] = [];
@@ -237,9 +293,8 @@ function deriveLaps(track: TrackPoint[], sport: Sport, speeds: number[]): Lap[] 
     let dist = 0;
     const hrs: number[] = [];
     for (let i = g.from + 1; i <= g.to; i++) {
-      const prev = track[i - 1];
       const cur = track[i];
-      dist += segmentDistance(prev, cur);
+      dist += segDist[i];
       if (cur.hr != null) hrs.push(cur.hr);
     }
     const durationSec = (track[g.to].t - track[g.from].t) / 1000;
@@ -251,30 +306,53 @@ function deriveLaps(track: TrackPoint[], sport: Sport, speeds: number[]): Lap[] 
       endMs: track[g.to].t,
       distanceM: dist,
       durationSec,
-      avgPaceSecPerKm: km > 0 && g.cls !== 'rest' ? durationSec / km : null,
+      avgPaceSecPerKm: dist >= MIN_PACE_DISTANCE_M && g.cls !== 'rest' ? durationSec / km : null,
       avgHr: avg(hrs),
     };
   });
 }
 
-/** Longest single moving stretch (meters) without dropping to a rest. */
+/** A dip below the sport's effort level shorter than this doesn't break a stretch. */
+const CONTINUOUS_DIP_TOLERANCE_MS = 10000;
+
+/**
+ * Longest stretch (meters) at the sport's own effort level (a run goal doesn't
+ * count walk breaks). Short dips — a smoothed-speed wobble, a corner, a few
+ * stalled fixes — are bridged; a sustained slowdown or a GPS gap ends it.
+ */
 function longestContinuous(
   track: TrackPoint[],
   sport: Sport,
   speeds: number[],
+  segDist: number[],
+  gaps: GpsGap[],
 ): number {
   const runClass = sport === 'ride' ? 'ride' : sport === 'walk' ? 'walk' : 'run';
+  const inGap = (t: number) => gaps.some((g) => t > g.startMs && t <= g.endMs);
   let best = 0;
   let cur = 0;
+  let pending = 0; // distance covered during the current dip, credited if it ends soon
+  let lastOnMs: number | null = null;
   for (let i = 1; i < track.length; i++) {
-    const cls = classify(speeds[i], sport);
-    // Count a stretch as "continuous" only while at the sport's own effort level
-    // (a run goal shouldn't count walk breaks).
-    if (cls === runClass) {
-      cur += segmentDistance(track[i - 1], track[i]);
+    const t = track[i].t;
+    if (inGap(t)) {
+      cur = 0;
+      pending = 0;
+      lastOnMs = null;
+      continue;
+    }
+    if (classify(speeds[i], sport) === runClass) {
+      if (lastOnMs == null) cur = 0;
+      cur += pending + segDist[i];
+      pending = 0;
+      lastOnMs = t;
       if (cur > best) best = cur;
+    } else if (lastOnMs != null && t - lastOnMs <= CONTINUOUS_DIP_TOLERANCE_MS) {
+      pending += segDist[i];
     } else {
       cur = 0;
+      pending = 0;
+      lastOnMs = null;
     }
   }
   return best;
@@ -303,6 +381,67 @@ function estimateCalories(
 }
 
 /**
+ * Per-km splits over the segments `include` accepts (all by default). Excluded
+ * segments neither add distance nor time — e.g. splits over the run laps only,
+ * skipping the warm-up and walk.
+ */
+export function computeSplits(
+  track: TrackPoint[],
+  segDist: number[],
+  include: (i: number) => boolean = () => true,
+): Split[] {
+  const smoothAlt = smooth(
+    track.map((p) => p.alt),
+    9,
+  );
+  const splits: Split[] = [];
+  let dist = 0;
+  let splitStartDist = 0;
+  let splitSec = 0;
+  let splitStartAlt: number | null = null;
+  let lastAlt: number | null = null;
+  const splitHr: number[] = [];
+  for (let i = 1; i < track.length; i++) {
+    if (!include(i)) continue;
+    const cur = track[i];
+    const a = smoothAlt[i];
+    if (splitStartAlt == null) splitStartAlt = smoothAlt[i - 1] ?? a;
+    dist += segDist[i];
+    splitSec += (cur.t - track[i - 1].t) / 1000;
+    if (cur.hr != null) splitHr.push(cur.hr);
+    if (a != null) lastAlt = a;
+    while (dist - splitStartDist >= 1000) {
+      splits.push({
+        index: splits.length,
+        distanceM: 1000,
+        durationSec: splitSec,
+        paceSecPerKm: splitSec,
+        elevChangeM: a != null && splitStartAlt != null ? a - splitStartAlt : 0,
+        avgHr: avg(splitHr),
+      });
+      splitStartDist += 1000;
+      splitSec = 0;
+      splitStartAlt = a;
+      splitHr.length = 0;
+    }
+  }
+  // Partial final split (the leftover <1 km after the last full km).
+  const remainderM = dist - splitStartDist;
+  if (remainderM > MIN_PACE_DISTANCE_M) {
+    splits.push({
+      index: splits.length,
+      distanceM: remainderM,
+      durationSec: splitSec,
+      paceSecPerKm: splitSec / (remainderM / 1000),
+      elevChangeM: lastAlt != null && splitStartAlt != null ? lastAlt - splitStartAlt : 0,
+      avgHr: avg(splitHr),
+      partial: true,
+    });
+  }
+  return splits;
+}
+
+/**
  * Pure function: derive the cached summary from the raw track.
  * Source of truth stays the track; improve this and re-run over stored workouts.
  */
@@ -312,10 +451,11 @@ export function deriveSummary(
   opts: DeriveOptions = {},
 ): WorkoutSummary {
   const empty: WorkoutSummary = {
-    durationMovingSec: 0,
-    durationElapsedSec: 0,
+    durationMovingSec: opts.timeline?.movingSec ?? 0,
+    durationElapsedSec: opts.timeline?.elapsedSec ?? 0,
     distanceM: 0,
     avgPaceSecPerKm: null,
+    runAvgPaceSecPerKm: null,
     avgSpeedKmh: null,
     elevGainM: 0,
     elevLossM: 0,
@@ -323,6 +463,7 @@ export function deriveSummary(
     maxHr: null,
     calories: null,
     splits: [],
+    splitsScope: 'session',
     maxSpeedKmh: null,
     avgCadence: null,
     maxCadence: null,
@@ -337,6 +478,7 @@ export function deriveSummary(
     laps: [],
     longestContinuousM: 0,
     trainingLoad: null,
+    gpsGaps: [],
     routePreview: [],
   };
   if (track.length < 2) return empty;
@@ -347,29 +489,31 @@ export function deriveSummary(
     track.map((p) => p.alt),
     9,
   );
+  // Fix-to-fix distances with GPS gaps and teleports zeroed (see segmentDistances).
+  const { dist: segDist, gaps: gpsGaps } = segmentDistances(track, sport);
 
   let distanceM = 0;
   let movedSegs = 0; // segments with a real GPS displacement (not carried-forward)
   let speedPts = 0; // points carrying a per-sample speed
+  let fixSegs = 0; // segments ending on a real GPS fix
   let movingMs = 0;
   let elevGainM = 0;
   let elevLossM = 0;
   let maxSpeedMs = 0;
   let flatEquivM = 0; // grade-adjusted equivalent distance (run/walk)
 
-  const hasMaxHr = opts.maxHr != null && opts.maxHr > 0;
-  const hrZones = hasMaxHr ? [0, 0, 0, 0, 0] : null;
+  const zoneBounds =
+    opts.zoneBounds && opts.zoneBounds.length === 4
+      ? opts.zoneBounds
+      : opts.maxHr != null && opts.maxHr > 0
+        ? opts.maxHr
+        : null;
+  const hasHr = track.some((p) => p.hr != null && p.hr > 0);
+  const hrZones = zoneBounds != null && hasHr ? [0, 0, 0, 0, 0] : null;
 
   // cumulative arrays for best-effort scanning
   const cumDist: number[] = [0];
   const cumTime: number[] = [0];
-
-  // per-km split accumulation
-  const splits: Split[] = [];
-  let splitStartDist = 0;
-  let splitStartMs = track[0].t;
-  let splitStartAlt = smoothAlt[0];
-  const splitHr: number[] = [];
 
   // elevation hysteresis reference on smoothed series
   let elevRef = smoothAlt[0];
@@ -384,20 +528,19 @@ export function deriveSummary(
     const prev = track[i - 1];
     const cur = track[i];
     const segMs = cur.t - prev.t;
-    // GPS distance, or the watch's speed integrated over the interval when GPS
-    // is stalled/absent (see segmentDistance) — keeps distance whole on dropouts.
-    const segDist = segmentDistance(prev, cur);
-    if (haversine(prev.lat, prev.lng, cur.lat, cur.lng) > 0.5) movedSegs++;
+    const segD = segDist[i];
+    if (!cur.noFix) fixSegs++;
+    if (!cur.noFix && haversine(prev.lat, prev.lng, cur.lat, cur.lng) > 0.5) movedSegs++;
     if (cur.speed != null) speedPts++;
-    const segSpeed = segMs > 0 ? segDist / (segMs / 1000) : 0;
+    const segSpeed = segMs > 0 ? segD / (segMs / 1000) : 0;
 
-    distanceM += segDist;
+    distanceM += segD;
     cumDist.push(distanceM);
     cumTime.push(cur.t / 1000);
 
     const moving = segSpeed >= MOVING_SPEED_THRESHOLD_MS;
     if (moving) movingMs += segMs;
-    if (segSpeed > maxSpeedMs && segSpeed <= MAX_SPEED_MS[sport]) maxSpeedMs = segSpeed; // skip GPS teleports
+    if (segSpeed > maxSpeedMs) maxSpeedMs = segSpeed; // teleports already zeroed
 
     // elevation: accumulate against a hysteresis reference on the smoothed series
     const a = smoothAlt[i];
@@ -415,17 +558,17 @@ export function deriveSummary(
     }
 
     // grade-adjusted equivalent distance (run/walk only, on moving segments)
-    if (usesPace(sport) && moving && segDist > 0) {
+    if (usesPace(sport) && moving && segD > 0) {
       const prevA = smoothAlt[i - 1];
-      const grade = prevA != null && a != null ? (a - prevA) / segDist : 0;
-      flatEquivM += segDist * gradeCostFactor(grade);
+      const grade = prevA != null && a != null ? (a - prevA) / segD : 0;
+      flatEquivM += segD * gradeCostFactor(grade);
     }
 
-    // HR zone time
-    if (hrZones && cur.hr != null && moving) {
-      hrZones[hrZoneIndex(cur.hr, opts.maxHr!)] += segMs / 1000;
+    // HR zone time — the whole session, including warm-up and rests, so the
+    // zone total adds up to the time HR was actually recorded.
+    if (hrZones && cur.hr != null && cur.hr > 0 && segMs <= GPS_GAP_MS) {
+      hrZones[hrZoneIndex(cur.hr, zoneBounds!)] += segMs / 1000;
     }
-    if (cur.hr != null) splitHr.push(cur.hr);
 
     // Cadence accumulation
     if (cur.cad != null && cur.cad > 0) {
@@ -438,45 +581,16 @@ export function deriveSummary(
       powerValues.push(cur.power);
       if (cur.power > maxPow) maxPow = cur.power;
     }
-
-    // close a km split
-    while (distanceM - splitStartDist >= 1000) {
-      const durationSec = (cur.t - splitStartMs) / 1000;
-      splits.push({
-        index: splits.length,
-        distanceM: 1000,
-        durationSec,
-        paceSecPerKm: durationSec,
-        elevChangeM:
-          a != null && splitStartAlt != null ? a - splitStartAlt : 0,
-        avgHr: avg(splitHr),
-      });
-      splitStartDist += 1000;
-      splitStartMs = cur.t;
-      splitStartAlt = a;
-      splitHr.length = 0;
-    }
   }
 
-  // Partial final split (the leftover <1 km after the last full km).
-  const remainderM = distanceM - splitStartDist;
-  if (remainderM > 50) {
-    const lastT = track[track.length - 1].t;
-    const durationSec = (lastT - splitStartMs) / 1000;
-    const lastAlt = smoothAlt[track.length - 1];
-    splits.push({
-      index: splits.length,
-      distanceM: remainderM,
-      durationSec,
-      paceSecPerKm: durationSec / (remainderM / 1000),
-      elevChangeM: lastAlt != null && splitStartAlt != null ? lastAlt - splitStartAlt : 0,
-      avgHr: avg(splitHr),
-      partial: true,
-    });
-  }
+  const splits = computeSplits(track, segDist);
 
-  const durationElapsedSec = (track[track.length - 1].t - track[0].t) / 1000;
-  const durationMovingSec = movingMs / 1000;
+  // Track `t` is an offset from the workout start, so the last point's t is the
+  // elapsed time (not last − first: a late first fix would drop the warm-up).
+  // A recorder-supplied session clock wins; moving can never exceed elapsed.
+  const trackElapsedSec = track[track.length - 1].t / 1000;
+  const durationElapsedSec = Math.max(opts.timeline?.elapsedSec ?? trackElapsedSec, 0);
+  const durationMovingSec = Math.min(opts.timeline?.movingSec ?? movingMs / 1000, durationElapsedSec);
   const distanceKm = distanceM / 1000;
 
   // Interval/effort analysis from a smoothed speed series. Only derive laps when
@@ -485,21 +599,20 @@ export function deriveSummary(
   // carries no speed) we leave laps empty rather than emit a misleading table;
   // platform-provided laps still override this in the mapper.
   const speeds = speedSeries(track);
-  const segCount = track.length - 1;
-  const speedCoverage = segCount > 0 ? speedPts / segCount : 0;
-  const gpsCoverage = segCount > 0 ? movedSegs / segCount : 0;
+  const speedCoverage = fixSegs > 0 ? speedPts / fixSegs : 0;
+  const gpsCoverage = fixSegs > 0 ? movedSegs / fixSegs : 0;
   const canDeriveLaps = speedCoverage > 0.6 || gpsCoverage > 0.7;
-  const laps = canDeriveLaps ? deriveLaps(track, sport, speeds) : [];
-  const longestContinuousM = longestContinuous(track, sport, speeds);
+  const laps = canDeriveLaps ? deriveLaps(track, sport, speeds, segDist) : [];
+  const longestContinuousM = longestContinuous(track, sport, speeds, segDist, gpsGaps);
 
-  // Training load: zone-weighted minutes (needs HR zones from a max-HR).
+  // Training load: zone-weighted minutes (needs HR zones).
   const trainingLoad = hrZones
     ? Math.round(
         hrZones.reduce((acc, secs, i) => acc + (secs / 60) * (i + 1), 0),
       )
     : null;
 
-  const hrValues = track.map((p) => p.hr).filter((v): v is number => v != null);
+  const hrValues = track.map((p) => p.hr).filter((v): v is number => v != null && v > 0);
 
   // Compute cadence aggregates
   const avgCadence = avg(cadValues);
@@ -515,12 +628,14 @@ export function deriveSummary(
     totalSteps = Math.round(avgCadence * (durationMovingSec / 60));
   }
 
+  const fixes = track.filter((p) => !p.noFix);
   return {
     durationMovingSec,
     durationElapsedSec,
     distanceM,
     avgPaceSecPerKm:
-      usesPace(sport) && distanceKm > 0 ? durationMovingSec / distanceKm : null,
+      usesPace(sport) && distanceM >= MIN_PACE_DISTANCE_M ? durationMovingSec / distanceKm : null,
+    runAvgPaceSecPerKm: null, // set when typed run laps exist (see applyLapScopes)
     avgSpeedKmh:
       sport === 'ride' && durationMovingSec > 0
         ? distanceKm / (durationMovingSec / 3600)
@@ -531,6 +646,7 @@ export function deriveSummary(
     maxHr: hrValues.length ? Math.max(...hrValues) : null,
     calories: estimateCalories(sport, distanceM, durationMovingSec, opts.weightKg),
     splits,
+    splitsScope: 'session',
     maxSpeedKmh: maxSpeedMs * 3.6,
     avgCadence,
     maxCadence: computedMaxCad,
@@ -544,10 +660,78 @@ export function deriveSummary(
         : null,
     hrZones,
     bestEfforts: computeBestEfforts(cumDist, cumTime, distanceM),
-    bounds: computeBounds(track),
+    bounds: computeBounds(fixes),
     laps,
     longestContinuousM,
     trainingLoad,
-    routePreview: routePreview(track),
+    gpsGaps,
+    routePreview: routePreview(fixes),
   };
+}
+
+/** Lap types that make up the "run" part of a session (vs warm-up/walk/rest). */
+const EFFORT_LAP_TYPES = new Set<Lap['type']>(['run', 'ride']);
+
+/**
+ * Once typed laps are known (planned intervals), scope splits and pace to the
+ * run segment: per-km splits skip the warm-up/walk/rest laps, `runAvgPace`
+ * covers run laps only, and the longest stretch is at least the longest run lap.
+ * No-op when there are no run laps or the session is all one effort.
+ */
+export function applyLapScopes(s: WorkoutSummary, track: TrackPoint[], sport: Sport): void {
+  const runLaps = s.laps.filter((l) => EFFORT_LAP_TYPES.has(l.type));
+  if (runLaps.length === 0) return;
+  const runLapMax = Math.max(...runLaps.map((l) => l.distanceM));
+  if (runLapMax > s.longestContinuousM) s.longestContinuousM = runLapMax;
+  const runM = runLaps.reduce((a, l) => a + l.distanceM, 0);
+  const runSec = runLaps.reduce((a, l) => a + l.durationSec, 0);
+  s.runAvgPaceSecPerKm = usesPace(sport) && runM >= MIN_PACE_DISTANCE_M ? runSec / (runM / 1000) : null;
+  if (runLaps.length === s.laps.length || !usesPace(sport)) return;
+  const { dist } = segmentDistances(track, sport);
+  const inRun = (i: number) => {
+    const t = track[i].t;
+    return runLaps.some((l) => t > l.startMs && t <= l.endMs);
+  };
+  s.splits = computeSplits(track, dist, inRun);
+  s.splitsScope = 'run';
+}
+
+/**
+ * Clean up laps stored by older builds: warm-up/cool-down laps typed as runs,
+ * pace over a few meters, and sub-2 s artefact laps. Idempotent.
+ */
+export function normalizeLaps(laps: Lap[]): Lap[] {
+  return laps
+    .filter((l) => l.durationSec >= MIN_LAP_SEC)
+    .map((l, index) => {
+      const type: Lap['type'] = /warm/i.test(l.label ?? '')
+        ? 'warmup'
+        : /cool/i.test(l.label ?? '')
+          ? 'cooldown'
+          : l.type;
+      return {
+        ...l,
+        index,
+        type,
+        avgPaceSecPerKm: l.distanceM >= MIN_PACE_DISTANCE_M ? l.avgPaceSecPerKm : null,
+      };
+    });
+}
+
+/** Sanity checks on a finished summary; returns human-readable violations. */
+export function summaryInvariantViolations(s: WorkoutSummary): string[] {
+  const out: string[] = [];
+  if (s.durationMovingSec > s.durationElapsedSec + 1)
+    out.push(`moving ${s.durationMovingSec.toFixed(1)} s > elapsed ${s.durationElapsedSec.toFixed(1)} s`);
+  if (s.laps.length > 0) {
+    // Lap bounds live on the recorder's (moving) clock, so they should cover it.
+    const lapSec = s.laps.reduce((a, l) => a + l.durationSec, 0);
+    const endSec = s.laps[s.laps.length - 1].endMs / 1000;
+    const span = endSec - s.laps[0].startMs / 1000;
+    if (Math.abs(lapSec - span) > 2)
+      out.push(`lap durations sum to ${lapSec.toFixed(1)} s but laps span ${span.toFixed(1)} s`);
+    if (endSec > s.durationElapsedSec + 2)
+      out.push(`laps run to ${endSec.toFixed(1)} s, past elapsed ${s.durationElapsedSec.toFixed(1)} s`);
+  }
+  return out;
 }

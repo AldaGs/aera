@@ -125,6 +125,7 @@ export function LiveRecorder({
       watchSensorsRef.current = sensors;
       if (sensors.connected) {
         engine.hrProvider = () => sensors.latestHr();
+        sensors.onHr = () => engine.onHrEvent();
         engine.cadProvider = () => sensors.latestCadence();
         setWatchConnected(true);
       }

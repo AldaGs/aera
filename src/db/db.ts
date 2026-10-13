@@ -3,7 +3,7 @@ import type { TrackPoint, Workout } from '@/model/workout';
 import type { Goal } from '@/model/goal';
 import type { IntervalPlan } from '@/model/intervalPlan';
 import { migratePlan } from '@/model/intervalPlan';
-import { deriveSummary } from '@/metrics/deriveSummary';
+import { applyLapScopes, deriveSummary, normalizeLaps, type DeriveOptions } from '@/metrics/deriveSummary';
 
 // Workout metadata + cached summary live in one table for fast list views.
 // The large raw track lives in a separate table keyed by workout id, so loading
@@ -187,11 +187,7 @@ export async function deletePlan(id: string): Promise<IntervalPlan | undefined> 
  * added summary fields (laps, calories, training load…). Pure over the stored
  * track. Returns the number of workouts updated.
  */
-export async function rederiveAll(opts: {
-  maxHr?: number | null;
-  restingHr?: number | null;
-  weightKg?: number | null;
-}): Promise<number> {
+export async function rederiveAll(opts: DeriveOptions): Promise<number> {
   const metas = await db.workouts.toArray();
   let n = 0;
   for (const meta of metas) {
@@ -220,7 +216,12 @@ export async function rederiveAll(opts: {
     // These the derivation never knows regardless of source.
     if (old.calories != null) summary.calories = old.calories;
     if (old.vo2Max != null) summary.vo2Max = old.vo2Max;
-    if (old.laps?.length) summary.laps = old.laps;
+    if (old.laps?.length) summary.laps = normalizeLaps(old.laps);
+    // Older summaries took elapsed as last − first sample, dropping everything
+    // before the first fix; the track's own clock (last t) can only be longer.
+    summary.durationElapsedSec = Math.max(summary.durationElapsedSec, old.durationElapsedSec ?? 0);
+    summary.durationMovingSec = Math.min(summary.durationMovingSec, summary.durationElapsedSec);
+    applyLapScopes(summary, track.points, meta.sport);
     await db.workouts.put({ ...meta, summary });
     n++;
   }

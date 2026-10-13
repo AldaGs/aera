@@ -1,7 +1,7 @@
 import { Capacitor } from '@capacitor/core';
 import type { Workout } from '@/model/workout';
 import { importedWorkoutsByExternalId, saveWorkout } from '@/db/db';
-import { effectiveMaxHr, loadProfile } from '@/store/profile';
+import { deriveOptions, loadProfile } from '@/store/profile';
 import { SamsungHealth } from '@/plugins/samsungHealth';
 import { externalKey, mapHealthWorkout } from './mapWorkout';
 
@@ -42,7 +42,7 @@ export async function importFromSamsungHealth(days = 90): Promise<ImportResult> 
   }
   const existing = await importedWorkoutsByExternalId();
   const profile = loadProfile();
-  const maxHr = effectiveMaxHr(profile);
+  const { maxHr, zoneBounds } = deriveOptions(profile);
 
   let imported = 0;
   let upgraded = 0;
@@ -63,6 +63,7 @@ export async function importFromSamsungHealth(days = 90): Promise<ImportResult> 
     const mapped: Workout | null = mapHealthWorkout(hw, {
       athleteId: 'me',
       maxHr,
+      zoneBounds,
       restingHr: profile.restingHr,
       weightKg: profile.weightKg,
     });
