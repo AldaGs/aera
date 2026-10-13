@@ -1228,7 +1228,9 @@ body {
   background: color-mix(in srgb, var(--color-info) 13%, transparent);
   color: var(--color-info);
 }
-.lap-badge-rest {
+.lap-badge-rest,
+.lap-badge-warmup,
+.lap-badge-cooldown {
   background: #8a8a9922;
   color: var(--muted);
 }

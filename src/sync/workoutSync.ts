@@ -21,7 +21,10 @@ interface WatchWorkoutJson {
     power: number | null;
   }>;
   laps: RawLap[];
-  summary: { distanceM: number; durationSec: number };
+  /** Every HR sample [t_ms (active clock), bpm], incl. ones with no GPS fix. */
+  hr?: [number, number][];
+  /** durationSec = active (moving) time; elapsedSec = wall clock incl. pauses. */
+  summary: { distanceM: number; durationSec: number; elapsedSec?: number };
 }
 
 /** Convert one watch-recorded workout JSON into a normalized Workout and store
@@ -53,14 +56,10 @@ export async function importWatchWorkout(json: string): Promise<void> {
       await ackWorkout(w.id); // accidental start/stop — nothing worth keeping
       return;
     }
-    const workout = buildWorkoutFromTrack(
-      sport,
-      Date.parse(w.startedAt),
-      points,
-      w.laps ?? [],
-      'watch',
-      w.id,
-    );
+    const workout = buildWorkoutFromTrack(sport, Date.parse(w.startedAt), points, w.laps ?? [], 'watch', w.id, {
+      hrSamples: w.hr ?? [],
+      timeline: watchTimeline(w),
+    });
     // No GPS (indoors, or a warm-up in place): keep the run with the watch's own
     // totals instead of dropping it — distance comes from its step-based estimate.
     if (points.length < 2) {
@@ -75,6 +74,17 @@ export async function importWatchWorkout(json: string): Promise<void> {
   } catch (e) {
     console.warn('importWatchWorkout failed:', e);
   }
+}
+
+/** Session clock from the watch: active time, and wall elapsed (older watch
+ * builds didn't send it — fall back to the end of the last lap / sample). */
+function watchTimeline(w: WatchWorkoutJson): { elapsedSec: number; movingSec: number } | null {
+  const movingSec = w.summary?.durationSec ?? 0;
+  if (!(movingSec > 0)) return null;
+  const lastLapSec = Math.max(0, ...(w.laps ?? []).map((l) => l.endMs / 1000));
+  const lastPtSec = w.track.length ? w.track[w.track.length - 1].t / 1000 : 0;
+  const elapsedSec = Math.max(w.summary.elapsedSec ?? 0, movingSec, lastLapSec, lastPtSec);
+  return { elapsedSec, movingSec };
 }
 
 function applyWatchTotals(
@@ -146,7 +156,7 @@ export async function redenoiseWatchWorkouts(): Promise<number> {
         .map((l) => ({
           startMs: l.startMs,
           endMs: l.endMs,
-          kind: l.type === 'rest' ? 'recovery' : l.type === 'walk' ? 'walk' : 'run',
+          kind: l.type === 'rest' ? 'recovery' : /warm/i.test(l.label ?? '') ? 'warmup' : l.type,
           label: l.label ?? '',
         }));
       const rebuilt = buildWorkoutFromTrack(w.sport, Date.parse(w.startedAt), points, laps, 'watch', w.id);

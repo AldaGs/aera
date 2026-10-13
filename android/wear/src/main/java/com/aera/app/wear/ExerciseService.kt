@@ -441,6 +441,10 @@ class ExerciseService : Service() {
                     .put("power", JSONObject.NULL),
             )
         }
+        // Every HR sample on the active clock, not just the ones stamped on GPS
+        // fixes — a warm-up in place or a screen-off gap has HR but no fixes.
+        val hr = JSONArray()
+        for ((t, bpm) in hrSamples) hr.put(JSONArray().put(t).put(bpm))
         val laps = JSONArray()
         val bounds = lapStartsMs + lastActiveMs
         for (i in 0 until bounds.size - 1) {
@@ -458,12 +462,15 @@ class ExerciseService : Service() {
             .put("sport", sport)
             .put("startedAt", isoAt(startedAtMs))
             .put("track", track)
+            .put("hr", hr)
             .put("laps", laps)
             .put(
                 "summary",
                 JSONObject()
                     .put("distanceM", distanceM)
-                    .put("durationSec", lastActiveMs / 1000),
+                    .put("durationSec", lastActiveMs / 1000)
+                    // Wall clock start → finish, including pauses.
+                    .put("elapsedSec", (System.currentTimeMillis() - startedAtMs) / 1000),
             )
     }
 

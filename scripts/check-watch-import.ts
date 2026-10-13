@@ -18,26 +18,26 @@ function assert(cond: boolean, msg: string) {
   }
 }
 
-// Two 500 m-ish legs ~0.0045 deg apart in latitude (roughly 500 m), 10 points
-// each 1 min apart: a warm-up walk then a work run, matching the
-// ExerciseService plan-lap shape (kind/label per boundary).
+// Two ~475 m legs, one point every 10 s (closer than GPS_GAP_MS, so no gaps):
+// a warm-up walk then a work run, matching the ExerciseService plan-lap shape
+// (kind/label per boundary).
 const points: TrackPoint[] = [];
 let lat = 40.0;
-for (let i = 0; i < 20; i++) {
+for (let i = 0; i <= 114; i++) {
   points.push({
-    t: i * 60_000,
+    t: i * 10_000,
     lat,
     lng: -73.0,
     alt: null,
-    hr: i < 10 ? 120 : 150,
+    hr: i <= 54 ? 120 : 150,
     cad: null,
     speed: null,
     power: null,
   });
-  lat += 0.00045;
+  lat += 0.000075;
 }
 const laps: RawLap[] = [
-  { startMs: 0, endMs: 9 * 60_000, kind: 'walk', label: 'Warm-up' },
+  { startMs: 0, endMs: 9 * 60_000, kind: 'walk', label: 'Walk' },
   { startMs: 9 * 60_000, endMs: 19 * 60_000, kind: 'work', label: 'Work 1/1' },
 ];
 

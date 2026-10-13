@@ -20,6 +20,9 @@ export interface TrackPoint {
   cad: number | null; // cadence (steps/min run/walk, rpm bike) — optional
   speed: number | null; // m/s — from ExerciseLog.speed
   power: number | null; // watts — cycling, from ExerciseLog.power
+  /** HR-only sample with no GPS fix of its own (warm-up, screen-off gap); lat/lng
+   * are carried from the nearest fix and it never adds distance. */
+  noFix?: true;
 }
 
 /** Fastest time to cover a target distance anywhere within the workout. */
@@ -43,9 +46,11 @@ export interface Split {
  * Sourced from the platform's lap data when available, else derived from the
  * track by segmenting on sustained pace changes.
  */
+export type LapType = Sport | 'rest' | 'warmup' | 'cooldown';
+
 export interface Lap {
   index: number;
-  type: Sport | 'rest'; // 'rest' = recovery walk/stand between efforts
+  type: LapType; // 'rest' = recovery walk/stand between efforts
   startMs: number; // ms offset from workout start
   endMs: number;
   distanceM: number;
@@ -67,7 +72,8 @@ export interface WorkoutSummary {
   durationMovingSec: number; // excludes auto-pause
   durationElapsedSec: number;
   distanceM: number;
-  avgPaceSecPerKm: number | null; // run
+  avgPaceSecPerKm: number | null; // run — whole session (moving time / distance)
+  runAvgPaceSecPerKm: number | null; // run laps only; null without typed run laps
   avgSpeedKmh: number | null; // ride
   elevGainM: number;
   elevLossM: number;
@@ -75,6 +81,8 @@ export interface WorkoutSummary {
   maxHr: number | null;
   calories: number | null;
   splits: Split[];
+  /** 'session' = splits over the whole track; 'run' = over run laps only. */
+  splitsScope: 'session' | 'run';
   maxSpeedKmh: number | null;
 
   // Cadence & power aggregates
@@ -99,10 +107,20 @@ export interface WorkoutSummary {
   longestContinuousM: number;
   // Training load (TRIMP-style) for this session; null without HR + maxHR.
   trainingLoad: number | null;
+  // Spans (ms offsets) with no GPS fix for > GPS_GAP_MS; no distance is counted
+  // across them.
+  gpsGaps: { startMs: number; endMs: number }[];
 
   // Downsampled [lat, lng] path (~48 pts) for cheap feed/list thumbnails,
   // so list views never load the full raw track.
   routePreview: [number, number][];
+}
+
+export interface Correction {
+  field: keyof WorkoutSummary;
+  value: number;
+  reason: string;
+  at: string; // ISO time the correction was made
 }
 
 export interface Workout {
@@ -120,6 +138,9 @@ export interface Workout {
   title: string;
   notes: string;
   athleteId: string; // you vs Erika, for the shared-history phase
+  /** User overrides for known-wrong derived values, kept beside the raw data
+   * (e.g. { field: 'distanceM', value: 1500, reason: 'GPS cut a corner' }). */
+  corrections?: Correction[];
 
   // ingestion dedup: stable id from the source platform (Health Connect /
   // HealthKit session id). Null for manually created workouts.

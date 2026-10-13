@@ -1,8 +1,17 @@
-import type { Lap, Sport, TrackPoint, Workout, WorkoutSource } from '@/model/workout';
+import type { Lap, LapType, Sport, TrackPoint, Workout, WorkoutSource } from '@/model/workout';
 import type { HrZone, PlanStep, StepKind } from '@/model/intervalPlan';
-import { deriveSummary, haversine } from '@/metrics/deriveSummary';
+import {
+  GPS_GAP_MS,
+  MIN_LAP_SEC,
+  MIN_PACE_DISTANCE_M,
+  applyLapScopes,
+  deriveSummary,
+  haversine,
+  segmentDistances,
+  summaryInvariantViolations,
+} from '@/metrics/deriveSummary';
 import { saveWorkout } from '@/db/db';
-import { effectiveMaxHr, loadProfile } from '@/store/profile';
+import { deriveOptions, loadProfile, maybeRaiseMaxHr, zoneModel } from '@/store/profile';
 import type { LocationSample } from './location';
 import { ZoneGuard, type ZoneStatus } from './zoneGuard';
 import type { CueKind } from './cues';
@@ -65,50 +74,96 @@ export interface RawLap {
 }
 
 function lapsFromBounds(points: TrackPoint[], raw: RawLap[], sport: Sport): Lap[] {
-  return raw.map((l, i) => {
-    const seg = points.filter((p) => p.t >= l.startMs && p.t <= l.endMs);
-    let dist = 0;
-    const hrs: number[] = [];
-    for (let j = 1; j < seg.length; j++) {
-      dist += haversine(seg[j - 1].lat, seg[j - 1].lng, seg[j].lat, seg[j].lng);
-      if (seg[j].hr != null) hrs.push(seg[j].hr!);
-    }
-    const durationSec = (l.endMs - l.startMs) / 1000;
-    const km = dist / 1000;
-    return {
-      index: i,
-      type: l.kind === 'recovery' ? 'rest' : l.kind === 'walk' ? 'walk' : sport,
-      startMs: l.startMs,
-      endMs: l.endMs,
-      distanceM: dist,
-      durationSec,
-      avgPaceSecPerKm: km > 0 ? durationSec / km : null,
-      avgHr: hrs.length ? hrs.reduce((a, b) => a + b, 0) / hrs.length : null,
-      label: l.label,
-    };
-  });
+  const { dist: segDist } = segmentDistances(points, sport);
+  return raw
+    .filter((l) => (l.endMs - l.startMs) / 1000 >= MIN_LAP_SEC) // e.g. a 0.5 s trailing lap
+    .map((l, i) => {
+      let dist = 0;
+      const hrs: number[] = [];
+      for (let j = 1; j < points.length; j++) {
+        const t = points[j].t;
+        if (t <= l.startMs || t > l.endMs) continue;
+        dist += segDist[j];
+        if (points[j].hr != null && points[j].hr! > 0) hrs.push(points[j].hr!);
+      }
+      const durationSec = (l.endMs - l.startMs) / 1000;
+      const type: LapType =
+        l.kind === 'recovery'
+          ? 'rest'
+          : l.kind === 'walk'
+            ? 'walk'
+            : l.kind === 'warmup' || l.kind === 'cooldown'
+              ? l.kind
+              : sport;
+      return {
+        index: i,
+        type,
+        startMs: l.startMs,
+        endMs: l.endMs,
+        distanceM: dist,
+        durationSec,
+        // Pace over a few meters (a warm-up in place) is noise, not 12,000 s/km.
+        avgPaceSecPerKm: dist >= MIN_PACE_DISTANCE_M && type !== 'rest' ? durationSec / (dist / 1000) : null,
+        avgHr: hrs.length ? hrs.reduce((a, b) => a + b, 0) / hrs.length : null,
+        label: l.label || undefined,
+      };
+    });
+}
+
+/**
+ * Fold HR samples taken with no GPS fix nearby (timed warm-up with GPS off,
+ * before the first fix, screen-off gaps) into the track as `noFix` points at the
+ * nearest fix's coordinates, so HR covers the whole session. Samples within
+ * GPS_GAP_MS of a real fix are skipped — that fix already carries HR.
+ */
+export function mergeHrSamples(points: TrackPoint[], hrSamples: [number, number][]): TrackPoint[] {
+  const fixes = points.filter((p) => !p.noFix);
+  if (fixes.length === 0 || hrSamples.length === 0) return points;
+  const extra: TrackPoint[] = [];
+  let k = 0; // first fix with t >= sample t
+  for (const [t, hr] of [...hrSamples].sort((a, b) => a[0] - b[0])) {
+    if (!(hr > 0)) continue;
+    while (k < fixes.length && fixes[k].t < t) k++;
+    const before = fixes[k - 1];
+    const after = fixes[k];
+    const near = (before && t - before.t <= GPS_GAP_MS) || (after && after.t - t <= GPS_GAP_MS);
+    if (near) continue;
+    const anchor = before ?? after;
+    extra.push({ t, lat: anchor.lat, lng: anchor.lng, alt: anchor.alt, hr, cad: null, speed: 0, power: null, noFix: true });
+  }
+  if (extra.length === 0) return points;
+  return [...points, ...extra].sort((a, b) => a.t - b.t);
+}
+
+export interface BuildExtras {
+  /** HR samples [t_ms, bpm] on the track clock, including ones with no GPS fix. */
+  hrSamples?: [number, number][];
+  /** Session clock: wall elapsed and moving (elapsed − pauses), seconds. */
+  timeline?: { elapsedSec: number; movingSec: number } | null;
 }
 
 /**
  * Build a normalized Workout from a finished point stream + lap boundaries —
  * the shared tail end of both live recording (finish(), below) and watch-import
- * (src/sync/workoutSync.ts). Pure aside from the id default; no storage.
+ * (src/sync/workoutSync.ts). Pure aside from the id default and raising a
+ * too-low profile max HR; no storage.
  */
 export function buildWorkoutFromTrack(
   sport: Sport,
   startedAtMs: number,
-  points: TrackPoint[],
+  rawPoints: TrackPoint[],
   laps: RawLap[],
   source: WorkoutSource,
   id: string = crypto.randomUUID(),
+  extras: BuildExtras = {},
 ): Workout {
-  const profile = loadProfile();
-  const summary = deriveSummary(points, sport, {
-    maxHr: effectiveMaxHr(profile),
-    restingHr: profile.restingHr,
-    weightKg: profile.weightKg,
-  });
+  const points = mergeHrSamples(rawPoints, extras.hrSamples ?? []);
+  maybeRaiseMaxHr(points);
+  const summary = deriveSummary(points, sport, deriveOptions(loadProfile(), extras.timeline));
   if (laps.length > 0) summary.laps = lapsFromBounds(points, laps, sport);
+  applyLapScopes(summary, points, sport);
+  const violations = summaryInvariantViolations(summary);
+  if (violations.length) console.warn('workout summary invariants:', violations);
   return {
     id,
     sport,
@@ -137,6 +192,7 @@ interface Persisted {
   stepStartMs?: number;
   stepStartDist?: number;
   lapMeta?: LapMeta[];
+  hrSamples?: [number, number][];
   planComplete?: boolean;
   freeRunHrZone?: HrZone | null;
 }
@@ -173,6 +229,9 @@ export class RecordingEngine {
   private stepStartDist = 0;
   private lapMeta: LapMeta[] = []; // one per lapStartsMs boundary
   private planComplete = false;
+  // HR sampled on the 1 s tick, independent of GPS (warm-up with GPS off, no
+  // lock yet, screen-off gaps). Merged into the track on finish.
+  private hrSamples: [number, number][] = [];
   private gpsGap = false; // next fix starts a fresh segment (no distance across the gap)
   /** Fired on each step transition (entering `kind`, 'done' at plan end, or a
    * zone-guard event). */
@@ -180,11 +239,11 @@ export class RecordingEngine {
   /** HR zone target for a free run (no plan); ignored while a plan step has its own. */
   freeRunHrZone: HrZone | null = null;
   private zoneGuard = new ZoneGuard();
-  private maxHr: number | null;
+  private zoneBounds: number[] | null;
 
   constructor(sport: Sport) {
     this.sport = sport;
-    this.maxHr = effectiveMaxHr(loadProfile());
+    this.zoneBounds = zoneModel(loadProfile())?.boundaries ?? null;
   }
 
   /** Attach a structured interval plan; call before start(). */
@@ -212,7 +271,7 @@ export class RecordingEngine {
     const hr = this.hrProvider?.() ?? null;
     const targetZone = this.activeHrZone();
     const paused = this.status !== 'recording' || this.autoPaused;
-    const event = this.zoneGuard.sample(Date.now(), hr, targetZone, this.maxHr, paused);
+    const event = this.zoneGuard.sample(Date.now(), hr, targetZone, this.zoneBounds, paused);
     if (event) this.onCue?.(`zone-${event}` as CueKind);
   }
 
@@ -250,7 +309,7 @@ export class RecordingEngine {
       return;
     }
 
-    // Warm-up steps (time/manual targets) ignore GPS � jogging around before the
+    // Warm-up steps (time/manual targets) ignore GPS — jogging around before the
     // session just adds noise. Distance warm-ups still need it to advance.
     const step = this.plan && !this.planComplete ? this.plan[this.stepIndex] : null;
     if (step?.kind === 'warmup' && (step.target.type === 'time' || step.target.type === 'manual')) {
@@ -404,9 +463,21 @@ export class RecordingEngine {
       this.autoPaused = true;
       this.autoPauseStartedMs = Date.now();
     }
+    this.sampleHr();
     this.checkPlanAdvance();
     this.checkZoneGuard();
+    this.maybePersist(); // keeps HR-only stretches (no fixes) crash-safe too
     this.emit();
+  }
+
+  /** Record HR every tick from session start, whether or not GPS has a fix. */
+  private sampleHr(): void {
+    const hr = this.hrProvider?.() ?? null;
+    if (hr == null || hr <= 0 || this.autoPaused) return;
+    const t = this.elapsedMs();
+    const last = this.hrSamples[this.hrSamples.length - 1];
+    if (last && t - last[0] < 1000) return;
+    this.hrSamples.push([t, hr]);
   }
 
   /** Finish, persist a normalized Workout, and clear resume state. Null if too short. */
@@ -428,12 +499,19 @@ export class RecordingEngine {
     
     if (this.points.length < 2) return null;
 
+    const now = Date.now();
+    const timeline = {
+      elapsedSec: (now - this.startedAtMs) / 1000, // wall clock, start → finish
+      movingSec: this.elapsedMs(now) / 1000, // minus manual + auto pauses
+    };
+
     // Planned interval laps (typed + labeled) go through the shared assembler (the
     // same path watch-import uses). Built from the lap *boundaries* so laps tapped
     // after a plan ends (no meta) are kept, just untyped.
-    const planned = this.lapMeta.length > 0;
-    const bounds = [...this.lapStartsMs, this.elapsedMs()];
-    const laps: RawLap[] = planned
+    // Manual lap taps (no plan) take the same path, untyped.
+    const hasLaps = this.lapMeta.length > 0 || this.lapStartsMs.length > 1;
+    const bounds = [...this.lapStartsMs, this.elapsedMs(now)];
+    const laps: RawLap[] = hasLaps
       ? bounds.slice(0, -1).map((startMs, i) => ({
           startMs,
           endMs: bounds[i + 1],
@@ -441,8 +519,10 @@ export class RecordingEngine {
           label: this.lapMeta[i]?.label ?? '',
         }))
       : [];
-    const workout = buildWorkoutFromTrack(this.sport, this.startedAtMs, this.points, laps, 'manual');
-    if (!planned && this.lapStartsMs.length > 1) workout.summary.laps = this.buildManualLaps();
+    const workout = buildWorkoutFromTrack(this.sport, this.startedAtMs, this.points, laps, 'manual', undefined, {
+      hrSamples: this.hrSamples,
+      timeline,
+    });
     await saveWorkout(workout);
     return workout;
   }
@@ -451,36 +531,6 @@ export class RecordingEngine {
     this.status = 'idle';
     clearResume();
   }
-
-  private buildManualLaps(): Lap[] {
-    const bounds = [...this.lapStartsMs, this.elapsedMs()];
-    const laps: Lap[] = [];
-    for (let i = 0; i < bounds.length - 1; i++) {
-      const startMs = bounds[i];
-      const endMs = bounds[i + 1];
-      const seg = this.points.filter((p) => p.t >= startMs && p.t <= endMs);
-      let dist = 0;
-      const hrs: number[] = [];
-      for (let j = 1; j < seg.length; j++) {
-        dist += haversine(seg[j - 1].lat, seg[j - 1].lng, seg[j].lat, seg[j].lng);
-        if (seg[j].hr != null) hrs.push(seg[j].hr!);
-      }
-      const durationSec = (endMs - startMs) / 1000;
-      const km = dist / 1000;
-      laps.push({
-        index: i,
-        type: this.sport,
-        startMs,
-        endMs,
-        distanceM: dist,
-        durationSec,
-        avgPaceSecPerKm: km > 0 ? durationSec / km : null,
-        avgHr: hrs.length ? hrs.reduce((a, b) => a + b, 0) / hrs.length : null,
-      });
-    }
-    return laps;
-  }
-
 
   private planProgress(): PlanProgress | undefined {
     if (!this.plan) return undefined;
@@ -601,6 +651,7 @@ export class RecordingEngine {
       stepStartMs: this.stepStartMs,
       stepStartDist: this.stepStartDist,
       lapMeta: this.lapMeta,
+      hrSamples: this.hrSamples,
       planComplete: this.planComplete,
       freeRunHrZone: this.freeRunHrZone,
     };
@@ -637,6 +688,7 @@ export class RecordingEngine {
       e.stepStartMs = d.stepStartMs ?? 0;
       e.stepStartDist = d.stepStartDist ?? 0;
       e.lapMeta = d.lapMeta ?? [];
+      e.hrSamples = d.hrSamples ?? [];
       e.planComplete = d.planComplete ?? false;
       e.freeRunHrZone = d.freeRunHrZone ?? null;
       for (let i = 1; i < e.points.length; i++) {
