@@ -9,11 +9,13 @@ import {
   svgToPngBlob,
   type Template,
 } from '@/share/renderShareCard';
-import { shareOrDownloadFile } from '@/share/shareImage';
+import { saveFile, shareOrDownloadFile } from '@/share/shareImage';
+import { SavingOrb } from '@/ui/SavingOrb';
 
 export function ShareComposer({ id, onClose }: { id: string; onClose: () => void }) {
   const [w, setW] = useState<Workout | undefined>();
   const [template, setTemplate] = useState<Template>('story');
+  const [transparent, setTransparent] = useState(false);
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
@@ -25,17 +27,23 @@ export function ShareComposer({ id, onClose }: { id: string; onClose: () => void
   const athlete = loadProfile().name;
 
   const svg = useMemo(
-    () => (w ? renderShareCard(w, spec, athlete) : ''),
-    [w, spec, athlete],
+    () => (w ? renderShareCard(w, spec, athlete, transparent) : ''),
+    [w, spec, athlete, transparent],
   );
 
-  async function exportPng() {
+  async function exportPng(save = false) {
     if (!w || busy) return;
     setBusy(true);
     try {
       const blob = await svgToPngBlob(svg, spec.w, spec.h);
       const safe = w.title.replace(/[^\w]+/g, '-').toLowerCase();
-      const result = await shareOrDownloadFile(blob, `aera-${safe}.png`);
+      // Timestamped so a re-save never collides with (or fails to overwrite) an older copy.
+      const name = `aera-${safe}-${Date.now()}.png`;
+      if (save) {
+        setToast(await saveFile(blob, name));
+        return;
+      }
+      const result = await shareOrDownloadFile(blob, name);
       setToast(result === 'shared' ? 'Shared' : 'Saved PNG');
     } catch {
       setToast('Export failed');
@@ -60,12 +68,13 @@ export function ShareComposer({ id, onClose }: { id: string; onClose: () => void
           <p className="muted center">Loading…</p>
         ) : (
           <>
-            <div className={`share-preview share-preview-${template}`}>
+            <div className={`share-preview share-preview-${template}${transparent ? ' share-preview-clear' : ''}`}>
               <div
                 className="share-svg"
                 // Same SVG as the exported PNG, scaled to fit.
                 dangerouslySetInnerHTML={{ __html: svg }}
               />
+              {busy && <SavingOrb />}
             </div>
 
             <div className="range-toggle share-templates">
@@ -80,10 +89,25 @@ export function ShareComposer({ id, onClose }: { id: string; onClose: () => void
               ))}
             </div>
 
-            <button className="btn" onClick={exportPng} disabled={busy}>
+            <div className="range-toggle share-templates">
+              <button
+                className={`range-opt ${!transparent ? 'range-opt-active' : ''}`}
+                onClick={() => setTransparent(false)}
+              >
+                Background
+              </button>
+              <button
+                className={`range-opt ${transparent ? 'range-opt-active' : ''}`}
+                onClick={() => setTransparent(true)}
+              >
+                Transparent
+              </button>
+            </div>
+
+            <button className="btn" onClick={() => exportPng()} disabled={busy}>
               <ShareNetwork size={18} /> {busy ? 'Preparing…' : 'Share'}
             </button>
-            <button className="btn-ghost" onClick={exportPng} disabled={busy}>
+            <button className="btn-ghost" onClick={() => exportPng(true)} disabled={busy}>
               <DownloadSimple size={18} /> Save PNG
             </button>
 

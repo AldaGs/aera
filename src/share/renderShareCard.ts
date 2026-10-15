@@ -84,8 +84,9 @@ export function renderShareCard(
   w: Workout,
   spec: TemplateSpec,
   athleteName: string,
+  transparent = false,
 ): string {
-  if (spec.id === 'poster') return renderPoster(w, spec, athleteName);
+  if (spec.id === 'poster') return renderPoster(w, spec, athleteName, transparent);
   const { w: W, h: H } = spec;
   const isStory = spec.id === 'story';
   const s = w.summary;
@@ -95,9 +96,9 @@ export function renderShareCard(
   const headerY = isStory ? 150 : 96;
   const mapBox = {
     x: margin,
-    y: isStory ? 280 : 210,
+    y: isStory ? 310 : 260,
     w: W - margin * 2,
-    h: isStory ? 980 : 560,
+    h: isStory ? 920 : 520,
   };
   const statsY = mapBox.y + mapBox.h + (isStory ? 130 : 90);
 
@@ -116,16 +117,20 @@ export function renderShareCard(
   }
 
   // Stats row.
+  // Sized for phone viewing; on a transparent card muted text goes white and
+  // everything gets a shadow so it reads over any photo (same as the poster).
+  const muted = transparent ? '#ffffff' : '#a0a0b0';
+  const statX = 56;
   const cells = statCells(w);
-  const colW = (W - margin * 2) / cells.length;
+  const colW = (W - statX * 2) / cells.length;
   const statsSvg = cells
     .map((c, i) => {
-      const cx = margin + colW * i + colW / 2;
+      const cx = statX + colW * i + colW / 2;
       return `
-        <text x="${cx.toFixed(1)}" y="${statsY}" fill="#ffffff" font-size="52"
+        <text x="${cx.toFixed(1)}" y="${statsY}" fill="#ffffff" font-size="56"
           font-weight="800" text-anchor="middle">${esc(c.value)}</text>
-        <text x="${cx.toFixed(1)}" y="${statsY + 46}" fill="#8a8a99" font-size="26"
-          font-weight="600" letter-spacing="2" text-anchor="middle">${esc(
+        <text x="${cx.toFixed(1)}" y="${statsY + 48}" fill="${muted}" font-size="30"
+          font-weight="700" letter-spacing="2" text-anchor="middle">${esc(
             c.label.toUpperCase(),
           )}</text>`;
     })
@@ -158,31 +163,36 @@ export function renderShareCard(
       <stop offset="0%" stop-color="${ACCENT}"/>
       <stop offset="100%" stop-color="${ACCENT_2}"/>
     </linearGradient>
+    <filter id="sh" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="3" stdDeviation="6" flood-color="#000" flood-opacity="0.7"/>
+    </filter>
   </defs>
 
-  <rect width="${W}" height="${H}" fill="url(#bg)"/>
+  ${transparent ? '' : `<rect width="${W}" height="${H}" fill="url(#bg)"/>`}
 
-  <text x="${margin}" y="${headerY}" fill="url(#brand)" font-size="30"
+  <g ${transparent ? 'filter="url(#sh)"' : ''}>
+  <text x="${margin}" y="${headerY}" fill="url(#brand)" font-size="36"
     font-weight="800" letter-spacing="6">${sportLabel} · ${esc(athleteName.toUpperCase())}</text>
-  <text x="${margin}" y="${headerY + 68}" fill="#ffffff" font-size="64"
+  <text x="${margin}" y="${headerY + 80}" fill="#ffffff" font-size="76"
     font-weight="800">${esc(w.title)}</text>
-  <text x="${margin}" y="${headerY + 116}" fill="#8a8a99" font-size="30"
+  <text x="${margin}" y="${headerY + 136}" fill="${muted}" font-size="40"
     font-weight="600">${esc(date)}</text>
 
-  <rect x="${mapBox.x}" y="${mapBox.y}" width="${mapBox.w}" height="${mapBox.h}"
-    rx="40" fill="url(#mapbg)"/>
+  ${transparent ? '' : `<rect x="${mapBox.x}" y="${mapBox.y}" width="${mapBox.w}" height="${mapBox.h}"
+    rx="40" fill="url(#mapbg)"/>`}
   ${routeSvg}
 
   ${statsSvg}
 
-  <text x="${margin}" y="${footerY}" fill="url(#brand)" font-size="48"
+  <text x="${margin}" y="${footerY}" fill="url(#brand)" font-size="56"
     font-weight="800" letter-spacing="1">aera</text>
   ${
     s.gradeAdjustedPaceSecPerKm != null
-      ? `<text x="${W - margin}" y="${footerY}" fill="#8a8a99" font-size="28"
+      ? `<text x="${W - margin}" y="${footerY}" fill="${muted}" font-size="34"
     font-weight="600" text-anchor="end">GAP ${esc(fmtPace(s.gradeAdjustedPaceSecPerKm))}</text>`
       : ''
   }
+  </g>
 </svg>`;
 }
 
@@ -191,11 +201,16 @@ export function renderShareCard(
  * canvas over a clean dark ground, with a slim stat footer. An art-print take on
  * the workout — the second share style.
  */
-function renderPoster(w: Workout, spec: TemplateSpec, athleteName: string): string {
+function renderPoster(
+  w: Workout,
+  spec: TemplateSpec,
+  athleteName: string,
+  transparent: boolean,
+): string {
   const { w: W, h: H } = spec;
   const s = w.summary;
   const margin = 96;
-  const mapBox = { x: margin, y: margin, w: W - margin * 2, h: H - 360 };
+  const mapBox = { x: margin, y: margin, w: W - margin * 2, h: H - 480 };
 
   let routeSvg = '';
   if (s.routePreview.length >= 2 && s.bounds) {
@@ -211,17 +226,22 @@ function renderPoster(w: Workout, spec: TemplateSpec, athleteName: string): stri
       font-size="40" font-weight="700" text-anchor="middle">No route</text>`;
   }
 
+  // Sized for phone viewing (Instagram Stories shrinks the card); on a
+  // transparent card the muted text goes white and everything gets a shadow so
+  // it reads over any photo.
+  const muted = transparent ? '#ffffff' : '#a0a0b0';
+  const textX = 64;
   const cells = statCells(w);
-  const colW = (W - margin * 2) / cells.length;
-  const statsY = H - 150;
+  const colW = (W - textX * 2) / cells.length;
+  const statsY = H - 160;
   const statsSvg = cells
     .map((c, i) => {
-      const cx = margin + colW * i + colW / 2;
+      const cx = textX + colW * i + colW / 2;
       return `
-        <text x="${cx.toFixed(1)}" y="${statsY}" fill="#ffffff" font-size="46"
+        <text x="${cx.toFixed(1)}" y="${statsY}" fill="#ffffff" font-size="56"
           font-weight="800" text-anchor="middle">${esc(c.value)}</text>
-        <text x="${cx.toFixed(1)}" y="${statsY + 40}" fill="#8a8a99" font-size="22"
-          font-weight="600" letter-spacing="2" text-anchor="middle">${esc(
+        <text x="${cx.toFixed(1)}" y="${statsY + 46}" fill="${muted}" font-size="28"
+          font-weight="700" letter-spacing="2" text-anchor="middle">${esc(
             c.label.toUpperCase(),
           )}</text>`;
     })
@@ -243,20 +263,25 @@ function renderPoster(w: Workout, spec: TemplateSpec, athleteName: string): stri
       <stop offset="0%" stop-color="${ACCENT}"/>
       <stop offset="100%" stop-color="${ACCENT_2}"/>
     </linearGradient>
+    <filter id="sh" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="3" stdDeviation="6" flood-color="#000" flood-opacity="0.7"/>
+    </filter>
   </defs>
 
-  <rect width="${W}" height="${H}" fill="#0b0b0f"/>
+  ${transparent ? '' : `<rect width="${W}" height="${H}" fill="#0b0b0f"/>`}
+  <g ${transparent ? 'filter="url(#sh)"' : ''}>
   ${routeSvg}
 
-  <text x="${margin}" y="${H - 230}" fill="#ffffff" font-size="40"
+  <text x="${textX}" y="${H - 320}" fill="#ffffff" font-size="60"
     font-weight="800">${esc(w.title)}</text>
-  <text x="${margin}" y="${H - 190}" fill="#8a8a99" font-size="26"
+  <text x="${textX}" y="${H - 268}" fill="${muted}" font-size="36"
     font-weight="600">${esc(athleteName)} · ${esc(date)}</text>
 
   ${statsSvg}
 
-  <text x="${W / 2}" y="${H - 56}" fill="url(#brand)" font-size="40"
+  <text x="${W / 2}" y="${H - 50}" fill="url(#brand)" font-size="52"
     font-weight="800" letter-spacing="2" text-anchor="middle">aera</text>
+  </g>
 </svg>`;
 }
 

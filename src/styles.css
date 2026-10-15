@@ -2298,6 +2298,27 @@ body {
 }
 .countdown-toast b { font-size: 1.4em; font-variant-numeric: tabular-nums; }
 
+.share-preview-clear {
+  background: repeating-conic-gradient(#2a2a33 0 25%, #1a1a20 0 50%) 0 0 / 24px 24px;
+}
+
+.share-preview {
+  position: relative;
+}
+.saving-orb {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  border-radius: inherit;
+  background: color-mix(in srgb, #05050a 55%, transparent);
+  backdrop-filter: blur(3px);
+  animation: saving-orb-in 0.2s ease-out;
+}
+@keyframes saving-orb-in {
+  from { opacity: 0; }
+}
+
 /* ---- Reveal: screens and sections rise in when a tab / overlay opens ---- */
 @keyframes reveal {
   from { opacity: 0; transform: translateY(10px); }

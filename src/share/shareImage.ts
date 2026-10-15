@@ -62,3 +62,34 @@ export async function shareOrDownloadFile(
   URL.revokeObjectURL(url);
   return 'downloaded';
 }
+
+/**
+ * Save a file without opening the share sheet. On Android it goes to the public
+ * Pictures/aera folder (shows in the gallery); if that write is refused it falls
+ * back to Documents. On the web it's a plain download.
+ */
+export async function saveFile(blob: Blob, filename: string): Promise<string> {
+  if (Capacitor.isNativePlatform()) {
+    const data = await blobToBase64(blob);
+    try {
+      await Filesystem.writeFile({
+        path: `Pictures/aera/${filename}`,
+        data,
+        directory: Directory.ExternalStorage,
+        recursive: true,
+      });
+      return 'Saved to Pictures/aera';
+    } catch {
+      // ponytail: raw Pictures path can be refused on some Android versions; MediaStore plugin if Documents isn't good enough
+      await Filesystem.writeFile({ path: filename, data, directory: Directory.Documents });
+      return 'Saved to Documents';
+    }
+  }
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+  return 'Saved PNG';
+}
