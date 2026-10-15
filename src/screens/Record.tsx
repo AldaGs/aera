@@ -27,7 +27,7 @@ import { StartSheet } from '@/screens/StartSheet';
  * Samsung Health Data SDK plugin (native only). On web, Sync is unavailable and
  * the sample seeder stands in.
  */
-export function Record({ onRecorded }: { onRecorded: () => void }) {
+export function Record({ onRecorded }: { onRecorded: (workoutId?: string) => void }) {
   const [sport, setSport] = useState<Sport>('run');
   const [syncing, setSyncing] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
@@ -55,7 +55,7 @@ export function Record({ onRecorded }: { onRecorded: () => void }) {
       syncPlans().then(reloadPlans);
 
       WearBridge.addListener('workoutReceived', (e) => {
-        importWatchWorkout(e.json).then(onRecorded);
+        importWatchWorkout(e.json).then(() => onRecorded());
       }).then((h) => {
         if (active) handles.push(h);
         else h.remove();
@@ -211,7 +211,7 @@ export function Record({ onRecorded }: { onRecorded: () => void }) {
   function finishRecording(workoutId: string | null) {
     setRecording(null);
     setCanResume(false);
-    if (workoutId) onRecorded();
+    if (workoutId) onRecorded(workoutId);
   }
 
   if (recording) {

@@ -11,6 +11,9 @@ object RecState {
     /** Mirror clock: phone's elapsed ms at receive time, extrapolated while running. */
     @Volatile var mirrorElapsedMs: Long = 0L
     @Volatile var mirrorRxAt: Long = 0L
+    /** Mirror HR accumulators for the end-of-run summary. */
+    @Volatile var mirrorHrSum: Long = 0L
+    @Volatile var mirrorHrN: Int = 0
     /** Phone pre-start countdown seconds left (0 = none). */
     @Volatile var countdown: Int = 0
     @Volatile var paused: Boolean = false
@@ -67,6 +70,8 @@ object RecState {
         mirror = false
         mirrorElapsedMs = 0L
         mirrorRxAt = 0L
+        mirrorHrSum = 0L
+        mirrorHrN = 0
         countdown = 0
         paused = false
         autoPaused = false

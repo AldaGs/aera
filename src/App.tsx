@@ -45,9 +45,10 @@ export function App() {
         )}
         {tab === 'record' && (
           <Record
-            onRecorded={() => {
+            onRecorded={(id) => {
               bump();
               setTab('home');
+              if (id) setOpenWorkoutId(id);
             }}
           />
         )}

@@ -50,6 +50,13 @@ class PhoneListener : WearableListenerService() {
                     RecState.running = false
                     RecState.paused = false
                     RecState.mirror = false
+                    // Show the run's summary on the open mirror screen (phone owns the saved copy).
+                    RecState.sumDistanceM = RecState.distanceM
+                    RecState.sumDurationSec = RecState.elapsedSec
+                    RecState.sumAvgPaceSecPerKm = if (RecState.distanceM > 0) (RecState.elapsedSec * 1000 / RecState.distanceM).toInt() else 0
+                    RecState.sumAvgHr = if (RecState.mirrorHrN > 0) (RecState.mirrorHrSum / RecState.mirrorHrN).toInt() else 0
+                    RecState.syncState = "synced"
+                    RecState.summaryReady = true
                     getSystemService(NotificationManager::class.java).cancel(4)
                 }
                 stopService(Intent(this, HrService::class.java))
@@ -176,6 +183,12 @@ class PhoneListener : WearableListenerService() {
         RecState.targetZone = o.optInt("targetZone")
         RecState.zoneStatus = o.optString("zoneStatus", "none")
         o.optInt("maxHr").takeIf { it > 0 }?.let { RecState.maxHr = it }
+        // ponytail: ~1 Hz heartbeat counted as 1 s per sample for avg HR / zones.
+        if (!RecState.paused && RecState.hr > 0) {
+            RecState.mirrorHrSum += RecState.hr
+            RecState.mirrorHrN++
+            RecState.sumZoneSecs[Zones.index(RecState.hr, RecState.maxHr)]++
+        }
         if (first) openMirror()
     }
 
