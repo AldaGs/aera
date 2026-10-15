@@ -2297,3 +2297,53 @@ body {
   background: var(--accent); color: #fff;
 }
 .countdown-toast b { font-size: 1.4em; font-variant-numeric: tabular-nums; }
+
+/* ---- Reveal: screens and sections rise in when a tab / overlay opens ---- */
+@keyframes reveal {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: none; }
+}
+.screen > *,
+.overlay-body > * {
+  animation: reveal 0.38s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+.screen > :nth-child(2), .overlay-body > :nth-child(2) { animation-delay: 0.05s; }
+.screen > :nth-child(3), .overlay-body > :nth-child(3) { animation-delay: 0.1s; }
+.screen > :nth-child(4), .overlay-body > :nth-child(4) { animation-delay: 0.15s; }
+.screen > :nth-child(n + 5), .overlay-body > :nth-child(n + 5) { animation-delay: 0.2s; }
+
+/* ---- Sport icons: stick figures doing the exercise (walk/run cycle keyframes) ---- */
+.sport-icon { overflow: visible; }
+.sport-icon .lu, .sport-icon .ll { animation: var(--dur) linear infinite; }
+/* b-limbs run half a cycle behind; arms are opposite their legs */
+.sport-icon .leg-b, .sport-icon .leg-b .ll, .sport-icon .arm-a, .sport-icon .arm-a .ll { animation-delay: calc(var(--dur) / -2); }
+.sport-icon .leg-a, .sport-icon .leg-b { animation-name: var(--hip); }
+.sport-icon .leg-a .ll, .sport-icon .leg-b .ll { animation-name: var(--knee); }
+.sport-icon .arm-a, .sport-icon .arm-b { animation-name: var(--shoulder); }
+.sport-icon .arm-a .ll, .sport-icon .arm-b .ll { animation-name: var(--elbow); }
+
+/* facing right: negative rotation = limb forward, positive knee = foot kicks back */
+.sport-walk { --dur: 1s; --hip: walk-hip; --knee: walk-knee; --shoulder: walk-shoulder; --elbow: walk-elbow; }
+@keyframes walk-hip { 0%, 100% { transform: rotate(-24deg); } 50% { transform: rotate(22deg); } }
+@keyframes walk-knee { 0%, 45% { transform: rotate(0); } 70% { transform: rotate(55deg); } 90%, 100% { transform: rotate(0); } }
+@keyframes walk-shoulder { 0%, 100% { transform: rotate(-22deg); } 50% { transform: rotate(22deg); } }
+@keyframes walk-elbow { 0%, 100% { transform: rotate(-25deg); } 50% { transform: rotate(-5deg); } }
+
+.sport-run { --dur: 0.6s; --hip: run-hip; --knee: run-knee; --shoulder: run-shoulder; --elbow: run-elbow; }
+.sport-run .body { transform-origin: 12px 13px; animation: run-bob 0.3s ease-in-out infinite alternate; }
+@keyframes run-hip { 0%, 100% { transform: rotate(-45deg); } 50% { transform: rotate(35deg); } }
+@keyframes run-knee { 0% { transform: rotate(10deg); } 40% { transform: rotate(20deg); } 70% { transform: rotate(110deg); } 100% { transform: rotate(10deg); } }
+@keyframes run-shoulder { 0%, 100% { transform: rotate(-45deg); } 50% { transform: rotate(40deg); } }
+@keyframes run-elbow { 0%, 100% { transform: rotate(-90deg); } 50% { transform: rotate(-70deg); } }
+@keyframes run-bob { from { transform: rotate(8deg) translateY(0.6px); } to { transform: rotate(8deg) translateY(-0.6px); } }
+
+/* ride: thigh pumps around the crank, knee bends with it */
+.sport-ride { --dur: 0.7s; --hip: ride-hip; --knee: ride-knee; }
+@keyframes ride-hip { 0%, 100% { transform: rotate(-95deg); } 50% { transform: rotate(-45deg); } }
+@keyframes ride-knee { 0%, 100% { transform: rotate(105deg); } 50% { transform: rotate(45deg); } }
+.sport-ride .wheel { animation: spin 0.7s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .screen > *, .overlay-body > *, .sport-icon * { animation: none !important; }
+}
