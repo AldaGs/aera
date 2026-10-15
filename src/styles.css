@@ -387,6 +387,7 @@ body {
   color: var(--color-neutral-100);
 }
 .tag-outline {
+  background: transparent;
   border: 1px solid var(--accent);
   color: var(--accent);
 }
@@ -2008,9 +2009,10 @@ body {
   gap: 8px;
 }
 .builder-chip-row .tag {
-  border: 1px solid transparent;
+  border: 1px solid var(--color-neutral-700);
   cursor: pointer;
-  padding: 7px 11px;
+  padding: 10px 16px;
+  font-size: 14px;
 }
 .builder-chip-active {
   box-shadow: 0 0 0 1px var(--color-accent);
@@ -2049,10 +2051,12 @@ body {
 .builder-presets {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 8px;
 }
 .builder-preset {
   cursor: pointer;
+  padding: 10px 16px;
+  font-size: 14px;
   border: 1px solid var(--color-neutral-700);
 }
 
