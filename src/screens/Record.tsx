@@ -188,7 +188,7 @@ export function Record({ onRecorded }: { onRecorded: (workoutId?: string) => voi
 
   function engineForPlan(plan: IntervalPlan): RecordingEngine {
     const engine = new RecordingEngine(plan.sport);
-    engine.setPlan(flattenPlan(plan), plan.autoFinish);
+    engine.setPlan(flattenPlan(plan), plan.autoFinish, plan.name);
     return engine;
   }
 

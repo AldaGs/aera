@@ -1,5 +1,6 @@
 // Athlete profile + app settings. Small single-object state, persisted to
 // localStorage (not workout data — that lives in Dexie).
+import type { Sport } from '@/model/workout';
 
 export type Units = 'metric' | 'imperial';
 export type HrZoneMethod = 'pct_max_hr' | 'thresholds';
@@ -14,6 +15,12 @@ export interface Profile {
   maxHr: number | null; // for HR zones; null = estimate from age
   /** True when maxHr was raised automatically from a recorded sustained peak. */
   maxHrAuto: boolean;
+  /** Sport the auto-raised maxHr was observed in (a ride max ≠ a run max). */
+  maxHrSport: Sport | null;
+  /** Highest sustained HR seen in a run (auto-raised, never lowered). */
+  runMaxHr: number | null;
+  /** HR ceiling for runs: alert (haptic + audio) while above it. null = off. */
+  hrCeiling: number | null;
   restingHr: number | null;
   /** 'pct_max_hr' = 60/70/80/90 % of max HR; 'thresholds' = built from AT/AnT. */
   hrZoneMethod: HrZoneMethod;
@@ -41,6 +48,9 @@ export const defaultProfile: Profile = {
   heightCm: null,
   maxHr: null,
   maxHrAuto: false,
+  maxHrSport: null,
+  runMaxHr: null,
+  hrCeiling: null,
   restingHr: null,
   hrZoneMethod: 'pct_max_hr',
   aerobicThresholdHr: null,
@@ -149,13 +159,17 @@ export function sustainedPeakHr(samples: { t: number; hr: number | null }[], sus
  * age estimate / old value was too low). Returns the new max HR, or null if
  * nothing changed. Never lowers it.
  */
-export function maybeRaiseMaxHr(samples: { t: number; hr: number | null }[]): number | null {
+export function maybeRaiseMaxHr(samples: { t: number; hr: number | null }[], sport: Sport): number | null {
   const peak = sustainedPeakHr(samples);
   if (peak == null || peak > 230) return null; // >230 is sensor garbage
-  const p = loadProfile();
+  let p = loadProfile();
+  if (sport === 'run' && (p.runMaxHr == null || peak > p.runMaxHr)) {
+    p = { ...p, runMaxHr: peak };
+    saveProfile(p);
+  }
   const cur = effectiveMaxHr(p);
   if (cur != null && peak <= cur) return null;
-  saveProfile({ ...p, maxHr: peak, maxHrAuto: true });
+  saveProfile({ ...p, maxHr: peak, maxHrAuto: true, maxHrSport: sport });
   return peak;
 }
 

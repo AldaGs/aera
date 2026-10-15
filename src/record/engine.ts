@@ -1,4 +1,4 @@
-import type { Lap, LapType, Sport, TrackPoint, Workout, WorkoutSource } from '@/model/workout';
+import type { Lap, LapType, Sport, TrackPoint, Workout, WorkoutPlanIntent, WorkoutSource } from '@/model/workout';
 import type { HrZone, PlanStep, StepKind } from '@/model/intervalPlan';
 import {
   GPS_GAP_MS,
@@ -58,6 +58,8 @@ const RESUME_KEY = 'aera.activeRecording';
 const MAX_ACCURACY_M = 25; // drop fixes less certain than this (indoors, cold GPS)
 const STATIONARY_SPEED_MS = 0.5; // below this we're standing still, not moving
 const AUTO_PAUSE_AFTER_MS = 6000; // stationary this long → auto-pause the clock
+const CEILING_ALERT_AFTER_MS = 5000; // HR above the ceiling this long → alert
+const CEILING_REPEAT_MS = 30_000; // re-alert at most this often while still above
 
 interface LapMeta {
   kind: StepKind;
@@ -140,6 +142,31 @@ export interface BuildExtras {
   hrSamples?: [number, number][];
   /** Session clock: wall elapsed and moving (elapsed − pauses), seconds. */
   timeline?: { elapsedSec: number; movingSec: number } | null;
+  /** What the session intended (plan + HR ceiling). */
+  plan?: WorkoutPlanIntent | null;
+}
+
+/** Summarize a flattened plan into the intent stored on the workout. */
+export function planIntent(steps: PlanStep[] | null, name: string | null, hrCeiling: number | null): WorkoutPlanIntent | null {
+  if (!steps?.length && hrCeiling == null) return null;
+  let warmupSec = 0;
+  let walkSec = 0;
+  let targetDistanceM = 0;
+  for (const st of steps ?? []) {
+    const t = st.target;
+    const sec = t.type === 'time' || t.type === 'either' ? t.sec : 0;
+    const m = t.type === 'distance' || t.type === 'either' ? t.m : 0;
+    if (st.kind === 'warmup') warmupSec += sec;
+    else if (st.kind === 'walk' || st.kind === 'recovery') walkSec += sec;
+    else if (st.kind === 'run' || st.kind === 'work') targetDistanceM += m;
+  }
+  return {
+    name,
+    warmupSec: warmupSec || null,
+    walkSec: walkSec || null,
+    targetDistanceM: targetDistanceM || null,
+    hrCeiling,
+  };
 }
 
 /**
@@ -158,7 +185,7 @@ export function buildWorkoutFromTrack(
   extras: BuildExtras = {},
 ): Workout {
   const points = mergeHrSamples(rawPoints, extras.hrSamples ?? []);
-  maybeRaiseMaxHr(points);
+  maybeRaiseMaxHr(points, sport);
   const summary = deriveSummary(points, sport, deriveOptions(loadProfile(), extras.timeline));
   if (laps.length > 0) summary.laps = lapsFromBounds(points, laps, sport);
   applyLapScopes(summary, points, sport);
@@ -174,6 +201,7 @@ export function buildWorkoutFromTrack(
     summary,
     title: `${partOfDay(startedAtMs)} ${sportLabel(sport)}`,
     notes: '',
+    plan: extras.plan ?? null,
     athleteId: 'me',
     externalId: null,
   };
@@ -188,6 +216,8 @@ interface Persisted {
   status: RecStatus;
   plan?: PlanStep[] | null;
   planAutoFinish?: boolean;
+  intendedPlan?: PlanStep[] | null;
+  planName?: string | null;
   stepIndex?: number;
   stepStartMs?: number;
   stepStartDist?: number;
@@ -223,6 +253,12 @@ export class RecordingEngine {
   private autoPauseStartedMs = 0;
   // Structured interval plan (optional).
   private plan: PlanStep[] | null = null;
+  // The plan as attached (this.plan is dropped when a keep-recording plan ends).
+  private intendedPlan: PlanStep[] | null = null;
+  private planName: string | null = null;
+  // HR ceiling alert: when HR first went above it, and the last alert.
+  private ceilingSinceMs: number | null = null;
+  private ceilingAlertMs: number | null = null;
   private planAutoFinish = true;
   private stepIndex = 0;
   private stepStartMs = 0; // elapsed ms at current step start
@@ -232,6 +268,7 @@ export class RecordingEngine {
   // HR sampled on the 1 s tick, independent of GPS (warm-up with GPS off, no
   // lock yet, screen-off gaps). Merged into the track on finish.
   private hrSamples: [number, number][] = [];
+  private lastDeliveredFix: { lat: number; lng: number } | null = null;
   private gpsGap = false; // next fix starts a fresh segment (no distance across the gap)
   /** Fired on each step transition (entering `kind`, 'done' at plan end, or a
    * zone-guard event). */
@@ -240,15 +277,20 @@ export class RecordingEngine {
   freeRunHrZone: HrZone | null = null;
   private zoneGuard = new ZoneGuard();
   private zoneBounds: number[] | null;
+  private hrCeiling: number | null;
 
   constructor(sport: Sport) {
     this.sport = sport;
-    this.zoneBounds = zoneModel(loadProfile())?.boundaries ?? null;
+    const profile = loadProfile();
+    this.zoneBounds = zoneModel(profile)?.boundaries ?? null;
+    this.hrCeiling = sport === 'ride' ? null : profile.hrCeiling;
   }
 
   /** Attach a structured interval plan; call before start(). */
-  setPlan(steps: PlanStep[], autoFinish: boolean): void {
+  setPlan(steps: PlanStep[], autoFinish: boolean, name: string | null = null): void {
     this.plan = steps.length ? steps : null;
+    this.planName = name;
+    this.intendedPlan = this.plan;
     this.planAutoFinish = autoFinish;
     this.stepIndex = 0;
     this.stepStartMs = 0;
@@ -314,8 +356,18 @@ export class RecordingEngine {
     const step = this.plan && !this.planComplete ? this.plan[this.stepIndex] : null;
     if (step?.kind === 'warmup' && (step.target.type === 'time' || step.target.type === 'manual')) {
       this.gpsGap = true;
+      this.lastDeliveredFix = { lat: s.lat, lng: s.lng };
       this.sampleHr();
       this.checkPlanAdvance();
+      this.emit();
+      return;
+    }
+
+    // A fix at exactly the last delivered position but claiming speed is a
+    // stale cached location (seen as the first fix after a warm-up) — drop it.
+    const lastFix = this.lastDeliveredFix;
+    this.lastDeliveredFix = { lat: s.lat, lng: s.lng };
+    if (lastFix && s.lat === lastFix.lat && s.lng === lastFix.lng && (s.speed ?? 0) > 0) {
       this.emit();
       return;
     }
@@ -468,6 +520,7 @@ export class RecordingEngine {
     this.sampleHr();
     this.checkPlanAdvance();
     this.checkZoneGuard();
+    this.checkHrCeiling();
     this.maybePersist(); // keeps HR-only stretches (no fixes) crash-safe too
     this.emit();
   }
@@ -485,6 +538,23 @@ export class RecordingEngine {
   }
 
   /** Record HR every tick from session start, whether or not GPS has a fix. */
+  /** Alert once HR has been above the profile's ceiling for a few seconds,
+   * then at most every CEILING_REPEAT_MS while it stays above. */
+  private checkHrCeiling(): void {
+    const ceiling = this.hrCeiling;
+    const hr = this.hrProvider?.() ?? null;
+    if (ceiling == null || hr == null || hr <= ceiling || this.autoPaused) {
+      this.ceilingSinceMs = null;
+      return;
+    }
+    const now = Date.now();
+    this.ceilingSinceMs ??= now;
+    if (now - this.ceilingSinceMs < CEILING_ALERT_AFTER_MS) return;
+    if (this.ceilingAlertMs != null && now - this.ceilingAlertMs < CEILING_REPEAT_MS) return;
+    this.ceilingAlertMs = now;
+    this.onCue?.('hr-ceiling');
+  }
+
   private sampleHr(): void {
     const hr = this.hrProvider?.() ?? null;
     if (hr == null || hr <= 0 || this.autoPaused) return;
@@ -536,6 +606,7 @@ export class RecordingEngine {
     const workout = buildWorkoutFromTrack(this.sport, this.startedAtMs, this.points, laps, 'manual', undefined, {
       hrSamples: this.hrSamples,
       timeline,
+      plan: planIntent(this.intendedPlan, this.planName, loadProfile().hrCeiling),
     });
     await saveWorkout(workout);
     return workout;
@@ -661,6 +732,8 @@ export class RecordingEngine {
       status: this.status,
       plan: this.plan,
       planAutoFinish: this.planAutoFinish,
+      intendedPlan: this.intendedPlan,
+      planName: this.planName,
       stepIndex: this.stepIndex,
       stepStartMs: this.stepStartMs,
       stepStartDist: this.stepStartDist,
@@ -698,6 +771,8 @@ export class RecordingEngine {
       e.lastFixWall = Date.now();
       e.plan = d.plan ?? null;
       e.planAutoFinish = d.planAutoFinish ?? true;
+      e.intendedPlan = d.intendedPlan ?? d.plan ?? null;
+      e.planName = d.planName ?? null;
       e.stepIndex = d.stepIndex ?? 0;
       e.stepStartMs = d.stepStartMs ?? 0;
       e.stepStartDist = d.stepStartDist ?? 0;

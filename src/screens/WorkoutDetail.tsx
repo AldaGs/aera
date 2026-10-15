@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { X, ShareNetwork, Mountains, Heart, Timer, Gauge, MapPin, Fire, Trash, Lightning, Pulse, SneakerMove, Repeat, TrendUp, DownloadSimple } from '@phosphor-icons/react';
 import { exportWorkoutJson } from '@/share/exportJson';
-import { getWorkout, deleteWorkout } from '@/db/db';
+import { getWorkout, deleteWorkout, saveWorkout } from '@/db/db';
 import type { Lap, LapType, Workout } from '@/model/workout';
 import { RouteMap } from '@/ui/RouteMap';
 import { SPORT_ICON } from '@/ui/SportIcon';
@@ -84,6 +84,14 @@ export function WorkoutDetail({
         <p className="muted small">
           <SportIcon size={14} style={{ verticalAlign: '-2px' }} /> {sportLabel} · {fmtDate(w.startedAt)}
         </p>
+
+        <EffortLog
+          workout={w}
+          onSave={(next) => {
+            setW(next);
+            void saveWorkout(next);
+          }}
+        />
 
         <div className="detail-map">
           {/* Full GPS track, not the 48-point thumbnail preview (laps looked polygonal). */}
@@ -436,6 +444,42 @@ function LapsTable({ laps }: { laps: Lap[] }) {
         ))}
       </tbody>
     </table>
+  );
+}
+
+/** RPE (1–10) + free-text notes — the "did it feel easy or hard?" signal.
+ * Shown right under the header so it's the first thing seen after a run ends. */
+function EffortLog({ workout, onSave }: { workout: Workout; onSave: (w: Workout) => void }) {
+  const [notes, setNotes] = useState(workout.notes);
+  const rpe = workout.rpe ?? null;
+  return (
+    <section className="panel">
+      <div className="panel-head">
+        <Pulse size={18} className="icon-grad" />
+        <h2>{rpe == null ? 'How did it feel?' : `Effort ${rpe}/10`}</h2>
+      </div>
+      <p className="muted small">1 = very easy · 10 = all out</p>
+      <div className="seg" style={{ flexWrap: 'wrap' }}>
+        {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (
+          <button
+            key={n}
+            className={`seg-opt ${rpe === n ? 'seg-opt-active' : ''}`}
+            onClick={() => onSave({ ...workout, notes, rpe: rpe === n ? null : n })}
+          >
+            {n}
+          </button>
+        ))}
+      </div>
+      <textarea
+        className="notes-input"
+        rows={2}
+        value={notes}
+        placeholder="Notes — how did the end feel?"
+        onChange={(e) => setNotes(e.target.value)}
+        onBlur={() => notes !== workout.notes && onSave({ ...workout, notes })}
+        style={{ width: '100%', marginTop: 8, boxSizing: 'border-box' }}
+      />
+    </section>
   );
 }
 

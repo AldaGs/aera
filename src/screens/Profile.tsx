@@ -108,7 +108,7 @@ export function Profile({ onClose }: { onClose: () => void }) {
               inputMode="numeric"
               value={p.maxHr ?? ''}
               onChange={(e) => {
-                const next = { ...p, maxHr: numOrNull(e.target.value), maxHrAuto: false };
+                const next = { ...p, maxHr: numOrNull(e.target.value), maxHrAuto: false, maxHrSport: null };
                 setP(next);
                 saveProfile(next);
               }}
@@ -116,7 +116,11 @@ export function Profile({ onClose }: { onClose: () => void }) {
             />
           </Field>
           {p.maxHrAuto && p.maxHr && (
-            <p className="muted small">Raised automatically to the highest HR you've held for 10 s.</p>
+            <p className="muted small">
+              Raised automatically to the highest HR you've held for 10 s
+              {p.maxHrSport ? ` (in a ${p.maxHrSport})` : ''}.
+              {p.runMaxHr ? ` Highest in a run: ${p.runMaxHr}.` : ''}
+            </p>
           )}
           <Field icon={Pulse} label="Resting HR">
             <input
@@ -125,6 +129,15 @@ export function Profile({ onClose }: { onClose: () => void }) {
               value={p.restingHr ?? ''}
               onChange={(e) => update('restingHr', numOrNull(e.target.value))}
               placeholder="—"
+            />
+          </Field>
+          <Field icon={Heart} label="HR ceiling (runs)">
+            <input
+              type="number"
+              inputMode="numeric"
+              value={p.hrCeiling ?? ''}
+              onChange={(e) => update('hrCeiling', numOrNull(e.target.value))}
+              placeholder="off"
             />
           </Field>
           <Field icon={Heart} label="Zones">
