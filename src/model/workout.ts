@@ -123,6 +123,15 @@ export interface Correction {
   at: string; // ISO time the correction was made
 }
 
+/** The intended shape of a session, for intended-vs-actual comparisons. */
+export interface WorkoutPlanIntent {
+  name: string | null;
+  warmupSec: number | null; // total timed warm-up
+  walkSec: number | null; // total timed walk/recovery
+  targetDistanceM: number | null; // total distance of run/work steps
+  hrCeiling: number | null; // bpm the athlete meant to stay under
+}
+
 export interface Workout {
   id: string; // uuid
   sport: Sport;
@@ -141,6 +150,10 @@ export interface Workout {
   /** User overrides for known-wrong derived values, kept beside the raw data
    * (e.g. { field: 'distanceM', value: 1500, reason: 'GPS cut a corner' }). */
   corrections?: Correction[];
+  /** Perceived effort, 1 (very easy) .. 10 (max); asked when a session ends. */
+  rpe?: number | null;
+  /** What the session intended, snapshotted from the plan at record time. */
+  plan?: WorkoutPlanIntent | null;
 
   // ingestion dedup: stable id from the source platform (Health Connect /
   // HealthKit session id). Null for manually created workouts.

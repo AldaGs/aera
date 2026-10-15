@@ -95,8 +95,8 @@ export function LiveRecorder({
     const engine = engineRef.current;
     engine.onCue = (kind) => {
       void fireCue(kind);
-      if (kind === 'zone-high' || kind === 'zone-low') {
-        setZoneBanner(kind === 'zone-high' ? 'high' : 'low');
+      if (kind === 'zone-high' || kind === 'zone-low' || kind === 'hr-ceiling') {
+        setZoneBanner(kind === 'zone-low' ? 'low' : 'high');
         if (zoneBannerTimerRef.current) clearTimeout(zoneBannerTimerRef.current);
         zoneBannerTimerRef.current = setTimeout(() => setZoneBanner(null), 3000);
       }

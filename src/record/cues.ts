@@ -5,7 +5,7 @@ import type { StepKind } from '@/model/intervalPlan';
 
 /** A transition cue kind — the step you're entering, 'done' at plan end, or an HR
  * zone-guard event (see src/record/zoneGuard.ts). */
-export type CueKind = StepKind | 'done' | 'zone-high' | 'zone-low' | 'zone-back' | 'countdown';
+export type CueKind = StepKind | 'done' | 'zone-high' | 'zone-low' | 'zone-back' | 'hr-ceiling' | 'countdown';
 
 /**
  * Fire a transition cue. Phone haptics via @capacitor/haptics, with a distinct
@@ -50,6 +50,13 @@ export async function fireCue(kind: CueKind): Promise<void> {
         await Haptics.impact({ style: ImpactStyle.Heavy });
         await delay(100);
         await Haptics.impact({ style: ImpactStyle.Heavy });
+        break;
+      case 'hr-ceiling':
+        // Over the HR ceiling — three heavy taps, distinct from zone-high.
+        for (let i = 0; i < 3; i++) {
+          await Haptics.impact({ style: ImpactStyle.Heavy });
+          await delay(90);
+        }
         break;
       case 'zone-low':
         // Speed up — one long buzz.
